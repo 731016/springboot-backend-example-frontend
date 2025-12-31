@@ -150,9 +150,7 @@ const Center: React.FC = () => {
 
   //  渲染用户信息
   const renderUserInfo = ({
-    title,
-    group,
-    geographic,
+                            userName
   }: Partial<CurrentUser>) => {
     return (
       <div className={styles.detail}>
@@ -162,40 +160,7 @@ const Center: React.FC = () => {
               marginRight: 8,
             }}
           />
-          {title}
-        </p>
-        <p>
-          <ClusterOutlined
-            style={{
-              marginRight: 8,
-            }}
-          />
-          {group}
-        </p>
-        <p>
-          <HomeOutlined
-            style={{
-              marginRight: 8,
-            }}
-          />
-          {
-            (
-              geographic || {
-                province: {
-                  label: '',
-                },
-              }
-            ).province.label
-          }
-          {
-            (
-              geographic || {
-                city: {
-                  label: '',
-                },
-              }
-            ).city.label
-          }
+          {userName}
         </p>
       </div>
     );
@@ -228,49 +193,49 @@ const Center: React.FC = () => {
             {!loading && currentUser && (
               <>
                 <div className={styles.avatarHolder}>
-                  <img alt="" src={currentUser.avatar} />
-                  <div className={styles.name}>{currentUser.name}</div>
-                  <div>{currentUser?.signature}</div>
+                  <img alt="" src={currentUser.userAvatar} />
+                  <div className={styles.name}>{currentUser.userName}</div>
+                  <div>{currentUser?.userProfile}</div>
                 </div>
-                {renderUserInfo(currentUser)}
+                {/*{renderUserInfo(currentUser)}*/}
                 <Divider dashed />
-                <TagList tags={currentUser.tags || []} />
+                {/*<TagList tags={currentUser.tags || []} />*/}
                 <Divider
                   style={{
                     marginTop: 16,
                   }}
                   dashed
                 />
-                <div className={styles.team}>
-                  <div className={styles.teamTitle}>团队</div>
-                  <Row gutter={36}>
-                    {currentUser.notice?.map((item) => (
-                      <Col key={item.id} lg={24} xl={12}>
-                        <a href={item.href}>
-                          <Avatar size="small" src={item.logo} />
-                          {item.member}
-                        </a>
-                      </Col>
-                    ))}
-                  </Row>
-                </div>
+                {/*<div className={styles.team}>*/}
+                {/*  <div className={styles.teamTitle}>团队</div>*/}
+                {/*  <Row gutter={36}>*/}
+                    {/*{currentUser.notice?.map((item) => (*/}
+                    {/*  <Col key={item.id} lg={24} xl={12}>*/}
+                    {/*    <a href={item.href}>*/}
+                    {/*      <Avatar size="small" src={item.logo} />*/}
+                    {/*      {item.member}*/}
+                    {/*    </a>*/}
+                    {/*  </Col>*/}
+                    {/*))}*/}
+                  {/*</Row>*/}
+                {/*</div>*/}
               </>
             )}
           </Card>
         </Col>
-        <Col lg={17} md={24}>
-          <Card
-            className={styles.tabsCard}
-            variant="borderless"
-            tabList={operationTabList}
-            activeTabKey={tabKey}
-            onTabChange={(_tabKey: string) => {
-              setTabKey(_tabKey as tabKeyType);
-            }}
-          >
-            {renderChildrenByTabKey(tabKey)}
-          </Card>
-        </Col>
+        {/*<Col lg={17} md={24}>*/}
+        {/*  <Card*/}
+        {/*    className={styles.tabsCard}*/}
+        {/*    variant="borderless"*/}
+        {/*    tabList={operationTabList}*/}
+        {/*    activeTabKey={tabKey}*/}
+        {/*    onTabChange={(_tabKey: string) => {*/}
+        {/*      setTabKey(_tabKey as tabKeyType);*/}
+        {/*    }}*/}
+        {/*  >*/}
+        {/*    {renderChildrenByTabKey(tabKey)}*/}
+        {/*  </Card>*/}
+        {/*</Col>*/}
       </Row>
     </GridContent>
   );

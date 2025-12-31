@@ -258,8 +258,34 @@ export default [
     ],
   },
   {
+    name: 'file',
+    icon: 'file',
+    path: '/file',
+    routes: [
+      {
+        name: 'manage',
+        icon: 'smile',
+        path: '/file/manage',
+        component: './file/manage',
+      },
+      {
+        name: 'file-local-upload',
+        icon: 'smile',
+        path: '/file/file-local-upload',
+        component: './file/file-local-upload',
+      },
+      {
+        name: 'file-remote-upload',
+        icon: 'smile',
+        path: '/file/file-remote-upload',
+        component: './file/file-remote-upload',
+
+      },
+    ],
+  },
+  {
     path: '/',
-    redirect: '/dashboard/analysis',
+    redirect: '/account/center',
   },
   {
     component: '404',
