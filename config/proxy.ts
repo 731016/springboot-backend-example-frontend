@@ -12,7 +12,37 @@
 export default {
   // 如果需要自定义本地开发服务器  请取消注释按需调整
   dev: {
-    //   // localhost:8000/api/** -> https://preview.pro.ant.design/api/**
+    '/api/cache': {
+      // 要代理的地址
+      target: 'http://localhost:8103/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/cache': '/api/cache'}, // 保持路径一致，不要瞎删
+    },
+    '/api/file': {
+      // 要代理的地址
+      target: 'http://localhost:8102/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/file': '/api/file'}, // 保持路径一致，不要瞎删
+    },
+    '/api/': {
+      // 要代理的地址
+      target: 'http://localhost:8101/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api': '/api'}, // 保持路径一致，不要瞎删
+    },
+
+  },
+  /**
+   * @name 详细的代理配置
+   * @doc https://github.com/chimurai/http-proxy-middleware
+   */
+  test: {
+    '/api/file': {
+      // 要代理的地址
+      target: 'http://localhost:8102/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/file': '/api/file'}, // 保持路径一致，不要瞎删
+    },
     '/api/': {
       // 要代理的地址
       target: 'http://localhost:8101/',
@@ -20,21 +50,16 @@ export default {
       pathRewrite: {'^/api': '/api'}, // 保持路径一致，不要瞎删
     },
   },
-  /**
-   * @name 详细的代理配置
-   * @doc https://github.com/chimurai/http-proxy-middleware
-   */
-  test: {
-    // localhost:8000/api/** -> https://preview.pro.ant.design/api/**
-    '/api/': {
-      target: 'http://localhost:8101/',
-      changeOrigin: true,           // 必须
-      pathRewrite: {'^/api': '/api'}, // 保持路径一致，不要瞎删
-    },
-  },
   pre: {
+    '/api/file': {
+      // 要代理的地址
+      target: 'http://localhost:8102/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/file': '/api/file'}, // 保持路径一致，不要瞎删
+    },
     '/api/': {
-      target: 'your pre url',
+      // 要代理的地址
+      target: 'http://localhost:8101/',
       changeOrigin: true,           // 必须
       pathRewrite: {'^/api': '/api'}, // 保持路径一致，不要瞎删
     },

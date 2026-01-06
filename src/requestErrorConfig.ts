@@ -76,15 +76,61 @@ export const errorConfig: RequestConfig = {
       } else if (error.response) {
         // Axios 的错误
         // 请求成功发出且服务器也响应了状态码，但状态代码超出了 2xx 的范围
-        message.error(`Response code:${error.response.code}`);
+        if (error && error.response) {
+          switch (error.response.status) {
+            case 400:
+              error.message = '请求错误(400)';
+              break;
+            case 401:
+              error.message = '未授权，请重新登录(401)';
+              break;
+            case 403:
+              error.message = '拒绝访问(403)';
+              break;
+            case 404:
+              error.message = '请求出错(404)';
+              break;
+            case 408:
+              error.message = '请求超时(408)';
+              break;
+            case 4003:
+              error.message = 'token失效,请重新登录';
+              localStorage.removeItem('token');
+              location.reload();
+              break;
+            case 500:
+              error.message = '服务器错误(500)';
+              break;
+            case 501:
+              error.message = '服务未实现(501)';
+              break;
+            case 502:
+              error.message = '网络错误(502)';
+              break;
+            case 503:
+              error.message = '服务不可用(503)';
+              break;
+            case 504:
+              error.message = '网络超时(504)';
+              break;
+            case 505:
+              error.message = 'HTTP版本不受支持(505)';
+              break;
+            default:
+              error.message = '连接出错' + (error.response.status);
+          }
+        } else {
+          error.message = '连接服务器失败!'
+        }
+        message.error(error.message);
       } else if (error.request) {
         // 请求已经成功发起，但没有收到响应
         // \`error.request\` 在浏览器中是 XMLHttpRequest 的实例，
         // 而在node.js中是 http.ClientRequest 的实例
-        message.error('None response! Please retry.');
+        message.error('没有响应! 请重试.');
       } else {
         // 发送请求时出了点问题
-        message.error('Request error, please retry.');
+        message.error('请求错误, 请重试.');
       }
     },
   },

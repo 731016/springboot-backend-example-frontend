@@ -53,4 +53,6 @@ export default {
   'menu.file.manage': '文件查询',
   'menu.file.file-local-upload': '本地文件上传',
   'menu.file.file-remote-upload': '远程文件上传',
+  'menu.cache': '缓存管理',
+  'menu.cache.redis-cache': 'redis缓存管理',
 };

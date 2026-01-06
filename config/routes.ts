@@ -284,6 +284,18 @@ export default [
     ],
   },
   {
+    name: 'cache',
+    icon: 'ProfileOutlined',
+    path: '/cache',
+    routes: [
+      {
+        name: 'redis-cache',
+        icon: 'smile',
+        path: '/cache/redis-cache',
+        component: './cache/redis-cache',
+      },]
+  },
+  {
     path: '/',
     redirect: '/account/center',
   },

@@ -162,8 +162,8 @@ export default defineConfig({
     {
       requestLibPath: "import { request } from '@umijs/max'",
       schemaPath:
-        'https://gw.alipayobjects.com/os/antfincdn/CA1dOm%2631B/openapi.json',
-      projectName: 'swagger',
+        'http://localhost:8103/api/doc.html#/home',
+      projectName: 'redis-cache',
     },
   ],
   mock: {

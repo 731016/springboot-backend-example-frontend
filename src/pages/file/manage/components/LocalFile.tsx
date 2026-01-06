@@ -107,11 +107,6 @@ const Manage: React.FC = () => {
         <>
           <a
             onClick={async () => {
-        //查询key的tags
-        const {data} = await queryCurrentRemoteUserAvatarTags({
-          key: entity.key
-        });
-        entity.tags = data.tags;
         setCurrentRow(entity);
         setShowDetail(true);
       }}
