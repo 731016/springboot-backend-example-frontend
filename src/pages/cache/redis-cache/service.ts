@@ -6,7 +6,6 @@ import type {
   ApiResponse,
   CodeDictionary,
   CodeDictionaryCreateParams,
-  CodeDictionaryKeyQuery,
   CodeDictionaryListParams,
 } from './data';
 
@@ -44,24 +43,6 @@ export async function queryByType(
   options?: Record<string, any>,
 ) {
   return request<ApiResponse<CodeDictionary[]>>('/api/cache/getByType', {
-    method: 'POST',
-    data: params,
-    ...(options || {}),
-  });
-}
-
-/**
- * 根据 type + code 查询单条数据
- * POST /cache/getByAndTypeCode
- *
- * 说明：当前后端实现中参数同样是写死在 service 里，
- * 这里按通用结构封装，便于后续后端改造。
- */
-export async function queryByTypeAndCode(
-  params: CodeDictionaryKeyQuery,
-  options?: Record<string, any>,
-) {
-  return request<ApiResponse<CodeDictionary>>('/api/cache/getByAndTypeCode', {
     method: 'POST',
     data: params,
     ...(options || {}),

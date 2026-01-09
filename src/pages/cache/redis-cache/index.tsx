@@ -1,5 +1,5 @@
 // src/pages/cache/redis-cache/index.tsx
-import { PlusOutlined, ReloadOutlined, StopOutlined, SearchOutlined } from '@ant-design/icons';
+import {PlusOutlined, ReloadOutlined, StopOutlined, SearchOutlined} from '@ant-design/icons';
 import type {
   ActionType,
   ProColumns,
@@ -12,12 +12,11 @@ import {
   ProFormText,
   ProTable,
 } from '@ant-design/pro-components';
-import { Button, Drawer, Form, Input, message, Space } from 'antd';
-import React, { useRef, useState } from 'react';
+import {Button, Drawer, Form, Input, message, Space} from 'antd';
+import React, {useRef, useState} from 'react';
 import type {
   CodeDictionary,
   CodeDictionaryCreateParams,
-  CodeDictionaryKeyQuery,
   CodeDictionaryListParams,
   TableListPagination,
 } from './data';
@@ -26,7 +25,6 @@ import {
   clearCache,
   loadCache,
   queryByType,
-  queryByTypeAndCode,
 } from './service';
 
 /**
@@ -97,7 +95,11 @@ const RedisCachePage: React.FC = () => {
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
   const [showDetail, setShowDetail] = useState<boolean>(false);
   const [currentRow, setCurrentRow] = useState<CodeDictionary>();
-  const [singleQueryForm] = Form.useForm<CodeDictionaryKeyQuery>();
+
+  const sourceTypeEnum = {
+    'db': {text: '数据库', status: 'Success'},
+    'redis': {text: '缓存', status: 'Processing'}
+  };
 
   const columns: ProColumns<CodeDictionary>[] = [
     {
@@ -105,6 +107,14 @@ const RedisCachePage: React.FC = () => {
       dataIndex: 'id',
       width: 80,
       search: false,
+      valueType: 'indexBorder',
+    },
+    {
+      title: '来源类型',
+      dataIndex: 'sourceType',
+      valueType: 'select',
+      search: false,
+      valueEnum: sourceTypeEnum
     },
     {
       title: '类型',
@@ -164,6 +174,13 @@ const RedisCachePage: React.FC = () => {
     {
       title: 'ID',
       dataIndex: 'id',
+      valueType: 'indexBorder',
+    },
+    {
+      title: '来源类型',
+      dataIndex: 'sourceType',
+      valueType: 'select',
+      valueEnum: sourceTypeEnum
     },
     {
       title: '类型',
@@ -209,26 +226,6 @@ const RedisCachePage: React.FC = () => {
     },
   ];
 
-  /**
-   * 单条查询（根据 type + code）
-   */
-  const handleSingleQuery = async () => {
-    try {
-      const values = await singleQueryForm.validateFields();
-      const hide = message.loading('正在查询单条记录');
-      const res = await queryByTypeAndCode(values);
-      hide();
-      if (res.code === 0 && res.data) {
-        setCurrentRow(res.data);
-        setShowDetail(true);
-      } else {
-        message.warning(res.message || '未查询到数据');
-      }
-    } catch (error) {
-      // 校验失败或请求异常
-    }
-  };
-
   return (
     <PageContainer>
       <ProTable<CodeDictionary, CodeDictionaryListParams & TableListPagination>
@@ -241,7 +238,7 @@ const RedisCachePage: React.FC = () => {
         toolBarRender={() => [
           <Space key="toolbar">
             <Button
-              icon={<ReloadOutlined />}
+              icon={<ReloadOutlined/>}
               onClick={async () => {
                 const success = await handleLoadCache();
                 if (success) {
@@ -253,7 +250,7 @@ const RedisCachePage: React.FC = () => {
             </Button>
             <Button
               danger
-              icon={<StopOutlined />}
+              icon={<StopOutlined/>}
               onClick={async () => {
                 const success = await handleClearCache();
                 if (success) {
@@ -265,7 +262,7 @@ const RedisCachePage: React.FC = () => {
             </Button>
             <Button
               type="primary"
-              icon={<PlusOutlined />}
+              icon={<PlusOutlined/>}
               onClick={() => {
                 setCreateModalVisible(true);
               }}
@@ -276,8 +273,7 @@ const RedisCachePage: React.FC = () => {
         ]}
         request={async (params) => {
           // ProTable 的分页参数暂时只在前端使用，后端当前接口返回全量列表
-          const { type } = params;
-          const res = await queryByType({ type });
+          const res = await queryByType(params);
           const list = res.data || [];
           return {
             data: list,
@@ -287,33 +283,6 @@ const RedisCachePage: React.FC = () => {
         }}
         columns={columns}
       />
-
-      {/* 单条查询区域，可以放在表格下方，也可以放在 PageContainer 的 extra 中 */}
-      {/*<Form*/}
-      {/*  form={singleQueryForm}*/}
-      {/*  layout="inline"*/}
-      {/*  style={{ marginTop: 16, marginBottom: 16 }}*/}
-      {/*>*/}
-      {/*  <Form.Item*/}
-      {/*    label="类型"*/}
-      {/*    name="type"*/}
-      {/*    rules={[{ required: true, message: '请输入类型' }]}*/}
-      {/*  >*/}
-      {/*    <Input placeholder="例如：USER" style={{ width: 200 }} />*/}
-      {/*  </Form.Item>*/}
-      {/*  <Form.Item*/}
-      {/*    label="编码"*/}
-      {/*    name="code"*/}
-      {/*    rules={[{ required: true, message: '请输入编码' }]}*/}
-      {/*  >*/}
-      {/*    <Input placeholder="例如：TUAOFEI" style={{ width: 200 }} />*/}
-      {/*  </Form.Item>*/}
-      {/*  <Form.Item>*/}
-      {/*    <Button type="primary" icon={<SearchOutlined />} onClick={handleSingleQuery}>*/}
-      {/*      查询单条*/}
-      {/*    </Button>*/}
-      {/*  </Form.Item>*/}
-      {/*</Form>*/}
 
       {/* 新增字典项弹窗 */}
       <ModalForm<CodeDictionaryCreateParams>
@@ -338,27 +307,35 @@ const RedisCachePage: React.FC = () => {
           name="type"
           label="类型"
           rules={[
-            { required: true, message: '请输入类型' },
+            {required: true, message: '请输入类型'},
           ]}
         />
         <ProFormText
           name="code"
           label="编码"
           rules={[
-            { required: true, message: '请输入编码' },
+            {required: true, message: '请输入编码'},
           ]}
         />
         <ProFormText
           name="name"
           label="名称"
           rules={[
-            { required: true, message: '请输入名称' },
+            {required: true, message: '请输入名称'},
           ]}
         />
-        <ProFormText name="attr1" label="扩展属性1" />
-        <ProFormText name="attr2" label="扩展属性2" />
-        <ProFormText name="attr3" label="扩展属性3" />
-        <ProFormText name="attr4" label="扩展属性4" />
+        <ProFormText name="attr1" label="扩展属性1"/>
+        <ProFormText name="attr2" label="扩展属性2"/>
+        <ProFormText name="attr3" label="扩展属性3"/>
+        <ProFormText name="attr4" label="扩展属性4"/>
+        <ProFormText name="attr5" label="扩展属性5"/>
+        <ProFormText name="attr6" label="扩展属性6"/>
+        <ProFormText name="attr7" label="扩展属性7"/>
+        <ProFormText name="attr8" label="扩展属性8"/>
+        <ProFormText name="attr9" label="扩展属性9"/>
+        <ProFormText name="attr10" label="扩展属性10"/>
+        <ProFormText name="attr11" label="扩展属性11"/>
+        <ProFormText name="attr12" label="扩展属性12"/>
       </ModalForm>
 
       {/* 详情抽屉 */}

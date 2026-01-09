@@ -34,6 +34,7 @@ export interface CodeDictionary {
   attr10?: string;
   attr11?: string;
   attr12?: string;
+  sourceType?:string;
 }
 
 /**
@@ -42,14 +43,8 @@ export interface CodeDictionary {
 export interface CodeDictionaryListParams {
   /** 字典类型，例如 USER */
   type?: string;
-}
-
-/**
- * 根据 type + code 查询单条记录
- */
-export interface CodeDictionaryKeyQuery {
-  type: string;
   code: string;
+  name: string;
 }
 
 /**
@@ -86,5 +81,3 @@ export interface TableListPagination {
   pageSize?: number;
   total?: number;
 }
-
-export type TableListItem = CodeDictionary;
