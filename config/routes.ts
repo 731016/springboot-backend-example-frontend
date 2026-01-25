@@ -296,6 +296,29 @@ export default [
       },]
   },
   {
+    path: '/admin',
+    name: 'admin',
+    icon: 'crown',
+    access: 'canAdmin',
+    routes: [
+      {
+        path: '/admin/user-manage',
+        name: 'user-manage',
+        component: './admin/user-manage',
+      },
+      {
+        path: '/admin/user-search',
+        name: 'user-search',
+        component: './admin/user-search',
+      },
+      {
+        path: '/admin/api-log-search',
+        name: 'api-log-search',
+        component: './admin/api-log-search',
+      },
+    ],
+  },
+  {
     path: '/',
     redirect: '/account/center',
   },

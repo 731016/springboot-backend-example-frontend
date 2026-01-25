@@ -12,6 +12,12 @@
 export default {
   // 如果需要自定义本地开发服务器  请取消注释按需调整
   dev: {
+    '/api/es': {
+      // 要代理的地址
+      target: 'http://localhost:8104/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/es': '/api/es'}, // 保持路径一致，不要瞎删
+    },
     '/api/cache': {
       // 要代理的地址
       target: 'http://localhost:8103/',
@@ -37,6 +43,18 @@ export default {
    * @doc https://github.com/chimurai/http-proxy-middleware
    */
   test: {
+    '/api/es': {
+      // 要代理的地址
+      target: 'http://localhost:8104/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/es': '/api/es'}, // 保持路径一致，不要瞎删
+    },
+    '/api/cache': {
+      // 要代理的地址
+      target: 'http://localhost:8103/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/cache': '/api/cache'}, // 保持路径一致，不要瞎删
+    },
     '/api/file': {
       // 要代理的地址
       target: 'http://localhost:8102/',
@@ -51,6 +69,18 @@ export default {
     },
   },
   pre: {
+    '/api/es': {
+      // 要代理的地址
+      target: 'http://localhost:8104/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/es': '/api/es'}, // 保持路径一致，不要瞎删
+    },
+    '/api/cache': {
+      // 要代理的地址
+      target: 'http://localhost:8103/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/cache': '/api/cache'}, // 保持路径一致，不要瞎删
+    },
     '/api/file': {
       // 要代理的地址
       target: 'http://localhost:8102/',

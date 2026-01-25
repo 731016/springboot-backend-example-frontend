@@ -55,4 +55,7 @@ export default {
   'menu.file.file-remote-upload': '远程文件上传',
   'menu.cache': '缓存管理',
   'menu.cache.redis-cache': 'redis缓存管理',
+  'menu.admin.user-manage': '用户管理',
+  'menu.admin.user-search': '用户搜索',
+  'menu.admin.api-log-search': '日志管理',
 };
