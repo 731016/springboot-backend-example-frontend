@@ -1,18 +1,29 @@
 // src/pages/admin/api-log-search/index.tsx
-import type { ActionType, ProColumns } from '@ant-design/pro-components';
+import type { ActionType, ProColumns, ProFormInstance } from '@ant-design/pro-components';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
 import { message, Tag, Modal, Button } from 'antd';
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import type { ApiLogEs } from './data';
 import { searchApiLog } from './service';
 import dayjs from 'dayjs';
 
 const ApiLogSearchPage: React.FC = () => {
   const actionRef = useRef<ActionType>(null);
+  const formRef = useRef<ProFormInstance>();
   const [jsonModalVisible, setJsonModalVisible] = useState(false);
   const [jsonModalTitle, setJsonModalTitle] = useState('');
   const [jsonModalContent, setJsonModalContent] = useState('');
   const [jsonModalHighlighted, setJsonModalHighlighted] = useState('');
+
+  // 页面打开时自动设置时间范围为当前前后半小时
+  useEffect(() => {
+    const now = dayjs();
+    const halfHourAgo = now.subtract(30, 'minute');
+    const halfHourLater = now.add(30, 'minute');
+    formRef.current?.setFieldsValue({
+      timeRange: [halfHourAgo, halfHourLater],
+    });
+  }, []);
 
   /**
    * 清理 JSON 字符串中的 HTML 标签，用于解析
@@ -475,6 +486,7 @@ const ApiLogSearchPage: React.FC = () => {
       <ProTable<ApiLogEs>
         headerTitle="API 日志搜索（Elasticsearch）"
         actionRef={actionRef}
+        formRef={formRef}
         rowKey="id"
         manualRequest={true}
         scroll={{ x: 'max-content' }}
