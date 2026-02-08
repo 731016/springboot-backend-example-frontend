@@ -58,4 +58,6 @@ export default {
   'menu.admin.user-manage': '用户管理',
   'menu.admin.user-search': '用户搜索',
   'menu.admin.api-log-search': '日志管理',
+  'menu.admin.job-manage': '定时任务管理',
+  'menu.admin.server-monitor': 'websocket管理',
 };

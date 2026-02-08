@@ -316,6 +316,16 @@ export default [
         name: 'api-log-search',
         component: './admin/api-log-search',
       },
+      {
+        path: '/admin/job-manage',
+        name: 'job-manage',
+        component: './admin/job-manage',
+      },
+      {
+        path: '/admin/server-monitor',
+        name: 'server-monitor',
+        component: './admin/server-monitor',
+      },
     ],
   },
   {
