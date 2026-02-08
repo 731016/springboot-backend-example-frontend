@@ -12,6 +12,12 @@
 export default {
   // 如果需要自定义本地开发服务器  请取消注释按需调整
   dev: {
+    '/api/kafka': {
+      // 要代理的地址
+      target: 'http://localhost:8107/',
+      changeOrigin: true,           // 必须
+      pathRewrite: {'^/api/es': '/api/kafka'}, // 保持路径一致，不要瞎删
+    },
     '/api/job': {
       // 要代理的地址
       target: 'http://localhost:8106/',
