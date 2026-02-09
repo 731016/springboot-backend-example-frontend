@@ -5,14 +5,13 @@ import {
   ModalForm,
   PageContainer,
   ProFormText,
-  ProFormTextArea,
   ProTable,
   DrawerForm,
   ProDescriptions,
 } from '@ant-design/pro-components';
-import { Button, message, Popconfirm, Tag, Space, Modal } from 'antd';
+import { Button, message, Popconfirm, Modal } from 'antd';
 import React, { useRef, useState } from 'react';
-import type { JobAndTrigger, JobForm, QueryJob } from './data';
+import type { JobAndTrigger, JobForm } from './data';
 import {
   addJob,
   deleteJob,
@@ -98,7 +97,7 @@ const handlePause = async (record: JobAndTrigger) => {
       message.error(res.message || '暂停失败');
       return false;
     }
-  } catch (error) {
+  } catch (_error) {
     hide();
     message.error('暂停失败，请重试');
     return false;
@@ -124,7 +123,7 @@ const handleResume = async (record: JobAndTrigger) => {
       message.error(res.message || '恢复失败');
       return false;
     }
-  } catch (error) {
+  } catch (_error) {
     hide();
     message.error('恢复失败，请重试');
     return false;
@@ -146,7 +145,7 @@ const handleUpdateCron = async (fields: JobForm) => {
       message.error(res.message || '修改失败');
       return false;
     }
-  } catch (error) {
+  } catch (_error) {
     hide();
     message.error('修改失败，请重试');
     return false;

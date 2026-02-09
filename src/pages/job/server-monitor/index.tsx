@@ -235,17 +235,22 @@ const ServerMonitorPage: React.FC = () => {
         </Card>
 
         <Card title="磁盘状态">
-          {serverInfo.sysFile.map((file, index) => (
-            <div key={index} style={{ marginBottom: 16 }}>
-              <Table
-                columns={columns}
-                dataSource={file}
-                rowKey="key"
-                pagination={false}
-                size="small"
-              />
-            </div>
-          ))}
+          {serverInfo.sysFile.map((file, index) => {
+            // 使用文件路径或名称作为 key，如果没有则使用索引+第一个字段的值组合
+            const fileKey = file.find((item) => item.key === 'dirName' || item.key === 'sysTypeName')?.value || 
+                           `${index}-${file[0]?.key || 'file'}-${file[0]?.value || ''}`;
+            return (
+              <div key={fileKey} style={{ marginBottom: 16 }}>
+                <Table
+                  columns={columns}
+                  dataSource={file}
+                  rowKey="key"
+                  pagination={false}
+                  size="small"
+                />
+              </div>
+            );
+          })}
         </Card>
       </Space>
     </PageContainer>

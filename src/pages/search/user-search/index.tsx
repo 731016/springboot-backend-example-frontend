@@ -42,6 +42,7 @@ const UserSearchPage: React.FC = () => {
       render: (_, record) => {
         // 如果有高亮字段，使用高亮字段，否则使用原字段
         const text = record.highlightUserAccount || record.userAccount;
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
         return <span dangerouslySetInnerHTML={{ __html: text }} />;
       },
     },
@@ -54,6 +55,7 @@ const UserSearchPage: React.FC = () => {
       render: (_, record) => {
         // 如果有高亮字段，使用高亮字段，否则使用原字段
         const text = record.highlightUserName || record.userName || '';
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
         return <span dangerouslySetInnerHTML={{ __html: text }} />;
       },
     },
@@ -65,6 +67,7 @@ const UserSearchPage: React.FC = () => {
       render: (_, record) => {
         // 如果有高亮字段，使用高亮字段，否则使用原字段
         const text = record.highlightUserProfile || record.userProfile || '';
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
         return <span dangerouslySetInnerHTML={{ __html: text }} />;
       },
     },

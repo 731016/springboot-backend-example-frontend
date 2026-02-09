@@ -67,7 +67,7 @@ const ApiLogSearchPage: React.FC = () => {
     let markerIndex = 0;
 
     // 1. 标记字符串值（绿色）
-    highlighted = highlighted.replace(/:\s*"((?:[^"\\]|\\.)*)"/g, (match, content) => {
+    highlighted = highlighted.replace(/:\s*"((?:[^"\\]|\\.)*)"/g, (_match, content) => {
       const marker = `__VAL_${markerIndex}__`;
       markers[marker] = `: <span style="color: #22863a;">"${content}"</span>`;
       markerIndex++;
@@ -75,7 +75,7 @@ const ApiLogSearchPage: React.FC = () => {
     });
 
     // 2. 标记数字值（蓝色）
-    highlighted = highlighted.replace(/:\s*(-?\d+\.?\d*)(?=\s*[,}\]]|$)/g, (match, num) => {
+    highlighted = highlighted.replace(/:\s*(-?\d+\.?\d*)(?=\s*[,}\]]|$)/g, (_match, num) => {
       const marker = `__NUM_${markerIndex}__`;
       markers[marker] = `: <span style="color: #005cc5;">${num}</span>`;
       markerIndex++;
@@ -83,7 +83,7 @@ const ApiLogSearchPage: React.FC = () => {
     });
 
     // 3. 标记布尔值和 null（紫色）
-    highlighted = highlighted.replace(/:\s*\b(true|false|null)\b(?=\s*[,}\]]|$)/g, (match, value) => {
+    highlighted = highlighted.replace(/:\s*\b(true|false|null)\b(?=\s*[,}\]]|$)/g, (_match, value) => {
       const marker = `__BOOL_${markerIndex}__`;
       markers[marker] = `: <span style="color: #6f42c1; font-weight: 500;">${value}</span>`;
       markerIndex++;
@@ -125,8 +125,9 @@ const ApiLogSearchPage: React.FC = () => {
     // 提取原始内容中的所有高亮关键词
     const highlightKeywords: string[] = [];
     const highlightRegex = /<em[^>]*>([^<]*)<\/em>/g;
-    let match;
+    let match: RegExpExecArray | null = null;
     
+    // biome-ignore lint/suspicious/noAssignInExpressions: 需要在此处赋值以检查是否匹配
     while ((match = highlightRegex.exec(originalContent)) !== null) {
       const keyword = match[1]; // 高亮的关键词
       if (keyword && !highlightKeywords.includes(keyword)) {
@@ -220,7 +221,7 @@ const ApiLogSearchPage: React.FC = () => {
         setJsonModalHighlighted(highlightJson(formattedJson));
       }
       setJsonModalVisible(true);
-    } catch (e) {
+    } catch (_e) {
       // 如果解析失败，尝试进一步处理
       try {
         // 如果内容看起来像是被转义的 JSON 字符串
@@ -245,7 +246,7 @@ const ApiLogSearchPage: React.FC = () => {
         } else {
           throw new Error('Not a JSON string');
         }
-      } catch (e2) {
+      } catch (_e2) {
         // 如果仍然失败，显示原始内容（保留高亮标签）
         setJsonModalTitle(title);
         setJsonModalContent(cleanContent);
@@ -351,6 +352,7 @@ const ApiLogSearchPage: React.FC = () => {
       hideInSearch: true,
       render: (_, record) => {
         const text = record.highlightUrl || record.url;
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
         return <span dangerouslySetInnerHTML={{ __html: text }} />;
       },
     },
@@ -383,6 +385,7 @@ const ApiLogSearchPage: React.FC = () => {
       hideInSearch: true,
       render: (_, record) => {
         const text = record.highlightClassMethod || record.classMethod;
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
         return <span dangerouslySetInnerHTML={{ __html: text }} />;
       },
     },
@@ -401,6 +404,7 @@ const ApiLogSearchPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span 
               style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
               dangerouslySetInnerHTML={{ __html: text }}
             />
             <Button
@@ -433,6 +437,7 @@ const ApiLogSearchPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span 
               style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮搜索结果
               dangerouslySetInnerHTML={{ __html: text }}
             />
             <Button
@@ -647,7 +652,7 @@ const ApiLogSearchPage: React.FC = () => {
             try {
               await navigator.clipboard.writeText(jsonModalContent);
               message.success('已复制到剪贴板');
-            } catch (err) {
+            } catch (_err) {
               // 降级方案：使用传统方法复制
               const textArea = document.createElement('textarea');
               textArea.value = jsonModalContent;
@@ -658,7 +663,7 @@ const ApiLogSearchPage: React.FC = () => {
               try {
                 document.execCommand('copy');
                 message.success('已复制到剪贴板');
-              } catch (e) {
+              } catch (_e) {
                 message.error('复制失败，请手动复制');
               }
               document.body.removeChild(textArea);
@@ -686,6 +691,7 @@ const ApiLogSearchPage: React.FC = () => {
             fontFamily: 'Monaco, Menlo, "Ubuntu Mono", Consolas, "source-code-pro", monospace',
             border: '1px solid #e1e4e8',
           }}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: 需要显示高亮JSON内容
           dangerouslySetInnerHTML={{ __html: jsonModalHighlighted }}
         />
       </Modal>

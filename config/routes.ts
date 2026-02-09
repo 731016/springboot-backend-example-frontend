@@ -296,6 +296,57 @@ export default [
       },]
   },
   {
+    name: 'search',
+    icon: 'search',
+    path: '/search',
+    routes: [
+      {
+        path: '/search/api-log-search',
+        name: 'api-log-search',
+        component: './search/api-log-search',
+      },
+      {
+        path: '/search/user-search',
+        name: 'user-search',
+        component: './search/user-search',
+      },
+    ]
+  },
+  {
+    name: 'job',
+    icon: 'flag',
+    path: '/job',
+    routes: [
+      {
+        path: '/job/job-manage',
+        name: 'job-manage',
+        component: './job/job-manage',
+      },
+      {
+        path: '/job/server-monitor',
+        name: 'server-monitor',
+        component: './job/server-monitor',
+      },
+    ]
+  },
+  {
+    path: '/msgQueue',
+    name: 'msgQueue',
+    icon: 'ControlOutlined',
+    routes: [
+      {
+        path: '/msgQueue/kafka-message',
+        name: 'kafka-message',
+        component: './msgQueue/kafka-message',
+      },
+      {
+        path: '/msgQueue/kafka-point-manage',
+        name: 'kafka-point-manage',
+        component: './msgQueue/kafka-point-manage',
+      },
+    ],
+  },
+  {
     path: '/admin',
     name: 'admin',
     icon: 'crown',
@@ -305,26 +356,6 @@ export default [
         path: '/admin/user-manage',
         name: 'user-manage',
         component: './admin/user-manage',
-      },
-      {
-        path: '/admin/user-search',
-        name: 'user-search',
-        component: './admin/user-search',
-      },
-      {
-        path: '/admin/api-log-search',
-        name: 'api-log-search',
-        component: './admin/api-log-search',
-      },
-      {
-        path: '/admin/job-manage',
-        name: 'job-manage',
-        component: './admin/job-manage',
-      },
-      {
-        path: '/admin/server-monitor',
-        name: 'server-monitor',
-        component: './admin/server-monitor',
       },
     ],
   },
