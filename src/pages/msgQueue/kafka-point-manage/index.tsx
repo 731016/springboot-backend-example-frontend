@@ -9,7 +9,7 @@ import {
   ProTable,
 } from '@ant-design/pro-components';
 import { Button, Descriptions, message, Modal, Space, Table } from 'antd';
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type {
   PointConfig,
@@ -44,6 +44,12 @@ const KafkaPointManagePage: React.FC = () => {
   const [loadingDataDetails, setLoadingDataDetails] = useState<boolean>(false);
   const [loadingStatistics, setLoadingStatistics] = useState<boolean>(false);
   const [loadingChartData, setLoadingChartData] = useState<boolean>(false);
+  const [realtimeModalVisible, setRealtimeModalVisible] = useState<boolean>(false);
+  const [realtimeData, setRealtimeData] = useState<DataDetail[]>([]);
+  const [realtimePointCode, setRealtimePointCode] = useState<string>('');
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
+  const stompClientRef = useRef<any>(null);
+  const socketRef = useRef<any>(null);
 
   // 计算 ECharts 配置选项（必须在组件顶层）
   const chartOption = useMemo(() => {
@@ -151,6 +157,117 @@ const KafkaPointManagePage: React.FC = () => {
     };
   }, [chartDataDetails]);
 
+  // 实时数据折线图配置
+  const realtimeChartOption = useMemo(() => {
+    if (realtimeData.length === 0) {
+      return null;
+    }
+
+    const filteredData = realtimeData
+      .filter((item) => item.value != null && item.collectTime)
+      .map((item) => {
+        if (!item.collectTime) return null;
+        return [
+          new Date(item.collectTime).getTime(),
+          Number(item.value) || 0,
+        ];
+      })
+      .filter((item): item is [number, number] => item !== null)
+      .sort((a, b) => a[0] - b[0]);
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const param = params[0];
+          const date = new Date(param.value[0]);
+          const dateStr = date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+          return `${dateStr}<br/>采集值: ${param.value[1].toFixed(2)}`;
+        },
+        axisPointer: {
+          type: 'cross',
+        },
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '10%',
+        top: '10%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'time',
+        boundaryGap: false,
+        axisLabel: {
+          formatter: (value: number) => {
+            const date = new Date(value);
+            return date.toLocaleTimeString('zh-CN', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            });
+          },
+          rotate: 45,
+        },
+        splitLine: {
+          show: false,
+        },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: {
+          formatter: (value: number) => value.toFixed(2),
+        },
+        splitLine: {
+          show: true,
+          lineStyle: {
+            type: 'dashed',
+          },
+        },
+      },
+      dataZoom: [
+        {
+          type: 'inside',
+          start: 0,
+          end: 100,
+        },
+        {
+          type: 'slider',
+          start: 0,
+          end: 100,
+          height: 20,
+        },
+      ],
+      series: [
+        {
+          name: '采集值',
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 6,
+          data: filteredData,
+          lineStyle: {
+            width: 2,
+            color: '#1890ff',
+          },
+          areaStyle: {
+            opacity: 0.3,
+            color: '#1890ff',
+          },
+          animation: true,
+          animationDuration: 500,
+        },
+      ],
+    };
+  }, [realtimeData]);
+
   const handleAdd = async (fields: AddPointConfigRequest) => {
     const hide = message.loading('正在添加采集点');
     try {
@@ -256,6 +373,225 @@ const KafkaPointManagePage: React.FC = () => {
       setLoadingDataDetails(false);
     }
   };
+
+  // 初始化 WebSocket 连接
+  const initRealtimeWebSocket = (pointCode: string) => {
+    try {
+      const loadScript = (src: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          const existingScript = document.querySelector(`script[src="${src}"]`);
+          if (existingScript) {
+            resolve();
+            return;
+          }
+
+          const script = document.createElement('script');
+          script.src = src;
+          script.async = true;
+          script.onload = () => {
+            console.log(`成功加载脚本: ${src}`);
+            resolve();
+          };
+          script.onerror = (error) => {
+            console.error(`加载脚本失败: ${src}`, error);
+            reject(new Error(`Failed to load script: ${src}`));
+          };
+          document.head.appendChild(script);
+        });
+      };
+
+      const initConnection = () => {
+        const SockJS = (window as any).SockJS;
+        const Stomp = (window as any).Stomp;
+
+        if (!SockJS || !Stomp) {
+          message.error('WebSocket 库加载失败，请刷新页面重试');
+          return;
+        }
+
+        // WebSocket 连接地址
+        // Kafka 应用运行在 8107 端口，context-path 是 /api，所以 WebSocket 端点是 /api/notification
+        // 注意：WebSocket 连接通常无法通过 HTTP 代理，需要直接连接到 Kafka 应用
+        // 如果使用代理失败，可以尝试直接使用完整地址: 'http://localhost:8107/api/notification'
+        const wsHost = 'http://localhost:8107/api/notification';
+        const wsTopic = '/topic/kafka/data';
+
+        console.log('WebSocket 连接配置:', { wsHost, wsTopic, pointCode });
+
+        console.log('开始连接 WebSocket:', wsHost);
+        const socket = new SockJS(wsHost);
+        const stompClient = Stomp.over(socket);
+
+        // 启用调试日志（开发时使用）
+        stompClient.debug = (str: string) => {
+          console.log('STOMP:', str);
+        };
+
+        stompClient.connect({}, (frame: any) => {
+          console.log('实时数据 WebSocket 连接成功:', frame);
+          setIsRealtimeConnected(true);
+          message.success('实时数据连接成功');
+
+          // 订阅消息
+          console.log('准备订阅主题:', wsTopic);
+          try {
+            const subscription = stompClient.subscribe(wsTopic, (response: any) => {
+              console.log('收到 WebSocket 消息:', response.body);
+            try {
+              const data: DataDetail = JSON.parse(response.body);
+              console.log('解析后的数据:', data);
+              console.log('当前点位编码:', pointCode, '收到点位编码:', data.pointCode);
+
+              // 只接收当前点位的数据
+              if (data.pointCode === pointCode) {
+                console.log('点位匹配，更新数据');
+                setRealtimeData((prev) => {
+                  const now = Date.now();
+                  const fiveMinutesAgo = now - 5 * 60 * 1000;
+                  // 过滤出最近5分钟的数据
+                  const filtered = [
+                    ...prev,
+                    data,
+                  ].filter((item) => {
+                    if (!item.collectTime) return false;
+                    const collectTime = new Date(item.collectTime).getTime();
+                    return collectTime >= fiveMinutesAgo;
+                  });
+                  // 按时间降序排序（最新的在最上面）
+                  const sorted = filtered.sort((a, b) => {
+                    const timeA = a.collectTime ? new Date(a.collectTime).getTime() : 0;
+                    const timeB = b.collectTime ? new Date(b.collectTime).getTime() : 0;
+                    return timeB - timeA; // 降序：timeB - timeA
+                  });
+                  console.log('更新后的数据量:', sorted.length);
+                  return sorted;
+                });
+              } else {
+                console.log('点位不匹配，忽略数据');
+              }
+            } catch (error) {
+              console.error('解析 WebSocket 消息失败:', error, '原始消息:', response.body);
+            }
+            });
+            
+            console.log('订阅成功，订阅对象:', subscription);
+            // 保存订阅引用，以便后续取消订阅
+            (stompClientRef.current as any).subscription = subscription;
+          } catch (subscribeError) {
+            console.error('订阅失败:', subscribeError);
+            message.error('订阅主题失败: ' + wsTopic);
+          }
+        }, (error: any) => {
+          console.error('实时数据 WebSocket 连接错误:', error);
+          message.error('实时数据连接失败: ' + (error.message || '未知错误'));
+          setIsRealtimeConnected(false);
+        });
+
+        stompClientRef.current = stompClient;
+        socketRef.current = socket;
+      };
+
+      if ((window as any).SockJS && (window as any).Stomp) {
+        initConnection();
+      } else {
+        Promise.all([
+          loadScript('/scripts/sockjs.min.js'),
+          loadScript('/scripts/stomp.js'),
+        ])
+          .then(() => {
+            if ((window as any).SockJS && (window as any).Stomp) {
+              initConnection();
+            } else {
+              message.error('WebSocket 库加载失败，请检查文件是否存在');
+            }
+          })
+          .catch((error) => {
+            console.error('加载 WebSocket 库失败:', error);
+            message.error(`加载 WebSocket 库失败: ${error.message}`);
+          });
+      }
+    } catch (error) {
+      console.error('WebSocket 连接失败:', error);
+      message.error('WebSocket 连接失败');
+    }
+  };
+
+  // 断开 WebSocket 连接
+  const destroyRealtimeWebSocket = () => {
+    if (stompClientRef.current) {
+      try {
+        // 取消订阅
+        if ((stompClientRef.current as any).subscription) {
+          (stompClientRef.current as any).subscription.unsubscribe();
+          console.log('已取消 WebSocket 订阅');
+        }
+        stompClientRef.current.disconnect();
+        console.log('已断开 WebSocket 连接');
+      } catch (_e) {
+        console.error('断开连接失败:', _e);
+      }
+      stompClientRef.current = null;
+    }
+    if (socketRef.current) {
+      try {
+        socketRef.current.close();
+      } catch (_e) {
+        console.error('关闭 socket 失败:', _e);
+      }
+      socketRef.current = null;
+    }
+    setIsRealtimeConnected(false);
+  };
+
+  // 打开实时数据 Modal
+  const handleViewRealtime = async (record: PointConfig) => {
+    if (!record.pointCode) {
+      message.error('pointCode 为空');
+      return;
+    }
+
+    // 先获取最近5分钟的历史数据
+    try {
+      const res = await getDataDetailsByPointCode(record.pointCode);
+      if (res.code === 0) {
+        const now = Date.now();
+        const fiveMinutesAgo = now - 5 * 60 * 1000;
+        const recentData = (res.data || [])
+          .filter((item) => {
+            if (!item.collectTime) return false;
+            const collectTime = new Date(item.collectTime).getTime();
+            return collectTime >= fiveMinutesAgo;
+          })
+          .sort((a, b) => {
+            const timeA = a.collectTime ? new Date(a.collectTime).getTime() : 0;
+            const timeB = b.collectTime ? new Date(b.collectTime).getTime() : 0;
+            return timeB - timeA; // 降序：最新的在最上面
+          });
+        setRealtimeData(recentData);
+      }
+    } catch (_e) {
+      console.error('获取历史数据失败:', _e);
+    }
+
+    setRealtimePointCode(record.pointCode);
+    setRealtimeModalVisible(true);
+    initRealtimeWebSocket(record.pointCode);
+  };
+
+  // 关闭实时数据 Modal
+  const handleCloseRealtime = () => {
+    destroyRealtimeWebSocket();
+    setRealtimeModalVisible(false);
+    setRealtimeData([]);
+    setRealtimePointCode('');
+  };
+
+  // 组件卸载时断开连接
+  useEffect(() => {
+    return () => {
+      destroyRealtimeWebSocket();
+    };
+  }, []);
 
   const handleViewStatistics = async (record: PointConfig) => {
     if (!record.pointCode) {
@@ -369,48 +705,58 @@ const KafkaPointManagePage: React.FC = () => {
     {
       title: '操作',
       valueType: 'option',
-      render: (_, record) => [
-        <a
-          key="start"
-          onClick={() => {
-            handleStart(record);
-          }}
-        >
-          启动
-        </a>,
-        <a
-          key="stop"
-          onClick={() => {
-            handleStop(record);
-          }}
-        >
-          停止
-        </a>,
-        <a
-          key="status"
-          onClick={() => {
-            handleViewStatus(record);
-          }}
-        >
-          查看状态
-        </a>,
-        <a
-          key="data"
-          onClick={() => {
-            handleViewDataDetails(record);
-          }}
-        >
-          查看采集数据
-        </a>,
-        <a
-          key="statistics"
-          onClick={() => {
-            handleViewStatistics(record);
-          }}
-        >
-          查看统计数据
-        </a>,
-      ],
+      render: (_, record) => (
+        <Space size="small" wrap>
+          <a
+            key="start"
+            onClick={() => {
+              handleStart(record);
+            }}
+          >
+            启动
+          </a>
+          <a
+            key="stop"
+            onClick={() => {
+              handleStop(record);
+            }}
+          >
+            停止
+          </a>
+          <a
+            key="status"
+            onClick={() => {
+              handleViewStatus(record);
+            }}
+          >
+            查看状态
+          </a>
+          <a
+            key="data"
+            onClick={() => {
+              handleViewDataDetails(record);
+            }}
+          >
+            查看采集数据
+          </a>
+          <a
+            key="statistics"
+            onClick={() => {
+              handleViewStatistics(record);
+            }}
+          >
+            查看统计数据
+          </a>
+          <a
+            key="realtime"
+            onClick={() => {
+              handleViewRealtime(record);
+            }}
+          >
+            实时数据
+          </a>
+        </Space>
+      ),
     },
   ];
 
@@ -743,6 +1089,101 @@ const KafkaPointManagePage: React.FC = () => {
             )}
           </Space>
         )}
+      </Modal>
+
+      {/* 实时数据 Modal */}
+      <Modal
+        title={`实时采集数据 - ${realtimePointCode}`}
+        open={realtimeModalVisible}
+        onCancel={handleCloseRealtime}
+        footer={[
+          <Button key="close" onClick={handleCloseRealtime}>
+            关闭
+          </Button>,
+        ]}
+        width={1400}
+        destroyOnClose
+      >
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          {/* 连接状态 */}
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ marginRight: 16 }}>
+              连接状态: {isRealtimeConnected ? (
+                <span style={{ color: '#52c41a' }}>已连接</span>
+              ) : (
+                <span style={{ color: '#ff4d4f' }}>未连接</span>
+              )}
+            </span>
+            <span>数据量: {realtimeData.length} 条（最近5分钟）</span>
+          </div>
+
+          {/* 实时折线图 */}
+          {realtimeChartOption && realtimeData.length > 0 && (
+            <div style={{ marginBottom: 24, width: '100%' }}>
+              <h3 style={{ marginBottom: 16 }}>实时数据趋势图</h3>
+              <ReactECharts
+                option={realtimeChartOption}
+                style={{ width: '100%', height: '400px' }}
+                opts={{ renderer: 'svg' }}
+              />
+            </div>
+          )}
+
+          {/* 实时数据表格 */}
+          {realtimeData.length > 0 ? (
+            <div>
+              <h3 style={{ marginBottom: 16 }}>实时数据列表</h3>
+              <Table
+                columns={[
+                  {
+                    title: 'ID',
+                    dataIndex: 'id',
+                    key: 'id',
+                    width: 80,
+                  },
+                  {
+                    title: '采集点编码',
+                    dataIndex: 'pointCode',
+                    key: 'pointCode',
+                  },
+                  {
+                    title: '采集时间',
+                    dataIndex: 'collectTime',
+                    key: 'collectTime',
+                    render: (time: string) => {
+                      if (!time) return '-';
+                      return new Date(time).toLocaleString('zh-CN');
+                    },
+                  },
+                  {
+                    title: '采集值',
+                    dataIndex: 'value',
+                    key: 'value',
+                    render: (value: number) => value?.toFixed(2) || '-',
+                  },
+                  {
+                    title: '属性名称',
+                    dataIndex: 'attributeName',
+                    key: 'attributeName',
+                  },
+                ]}
+                dataSource={realtimeData}
+                rowKey={(record, index) => record.id?.toString() || `realtime-${index}`}
+                pagination={{
+                  pageSize: 20,
+                  showSizeChanger: true,
+                  showQuickJumper: true,
+                }}
+                size="small"
+                scroll={{ y: 400 }}
+              />
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              暂无实时数据，等待数据推送...
+            </div>
+          )}
+        </Space>
       </Modal>
     </PageContainer>
   );
