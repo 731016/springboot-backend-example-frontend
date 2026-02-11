@@ -65,4 +65,8 @@ export default {
   'menu.msgQueue': '消息队列',
   'menu.msgQueue.kafka-message': 'kafka发送消息',
   'menu.msgQueue.kafka-point-manage': '采集点位管理',
+  'menu.calendar': '日历管理',
+  'menu.calendar.work-calendar': '工作日历',
+  'menu.calendar.shift-group': '班次管理',
+
 };

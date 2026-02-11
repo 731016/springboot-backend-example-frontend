@@ -347,6 +347,23 @@ export default [
     ],
   },
   {
+    path: '/calendar',
+    name: 'calendar',
+    icon: 'ControlOutlined',
+    routes: [
+      {
+        path: '/calendar/work-calendar',
+        name: 'work-calendar',
+        component: './calendar/work-calendar',
+      },
+      {
+        path: '/calendar/shift-group',
+        name: 'shift-group',
+        component: './calendar/shift-group',
+      }
+    ],
+  },
+  {
     path: '/admin',
     name: 'admin',
     icon: 'crown',
