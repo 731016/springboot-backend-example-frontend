@@ -4,20 +4,21 @@ import {
   PageContainer,
   ProFormDatePicker,
   ProFormSwitch,
-  ProFormText,
   ProFormTextArea,
-  ProFormTimePicker,
   ProTable,
 } from '@ant-design/pro-components';
-import { Button, Calendar, Card, message, Popconfirm, Space, Tag } from 'antd';
+import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { Button, Calendar, Card, DatePicker, message, Popconfirm, Space, Tag } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type {
   WorkCalendar,
   WorkCalendarQueryRequest,
   WorkCalendarSaveRequest,
 } from './data';
+import type { ShiftGroup, ShiftGroupQueryRequest } from '../shift-group/data';
+import { listShiftGroupByPage as listBaseShiftGroupByPage } from '../shift-group/service';
 import {
   deleteWorkCalendar,
   listWorkCalendarByPage,
@@ -28,49 +29,177 @@ import {
  * 工作日历维护页面（带日历控件）
  */
 const WorkCalendarPage: React.FC = () => {
-  const actionRef = useRef<ActionType>();
+  const actionRef = useRef<ActionType | undefined>(undefined);
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [currentRecord, setCurrentRecord] = useState<WorkCalendar | undefined>();
   const [selectedDate, setSelectedDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
+  const [calendarValue, setCalendarValue] = useState<Dayjs>(dayjs());
+  const [shiftOptions, setShiftOptions] = useState<ShiftGroup[]>([]);
+  const [selectedShiftKeys, setSelectedShiftKeys] = useState<React.Key[]>([]);
+  const [selectedShiftRows, setSelectedShiftRows] = useState<ShiftGroup[]>([]);
 
+  // 日历仅用于选择要查看的日期，刷新下方当日班次列表
   const handleCalendarSelect = (value: Dayjs) => {
     const dateStr = value.format('YYYY-MM-DD');
     setSelectedDate(dateStr);
-    // 选择日期后刷新当前日期的班次列表
+    setCalendarValue(value);
     actionRef.current?.reload();
   };
 
+  // 自定义日历头部：左侧前后月切换，右上方直接选择年份和月份
+  const calendarHeaderRender = ({
+    value,
+    onChange,
+  }: {
+    value: Dayjs;
+    onChange: (date: Dayjs) => void;
+  }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <Button
+          type="text"
+          icon={<LeftOutlined />}
+          onClick={() => {
+            const next = value.subtract(1, 'month');
+            setCalendarValue(next);
+            onChange(next);
+          }}
+        />
+        <span style={{ fontWeight: 500, minWidth: 72, textAlign: 'center' }}>{value.format('YYYY年M月')}</span>
+        <Button
+          type="text"
+          icon={<RightOutlined />}
+          onClick={() => {
+            const next = value.add(1, 'month');
+            setCalendarValue(next);
+            onChange(next);
+          }}
+        />
+      </div>
+      <DatePicker
+        picker="month"
+        value={value}
+        onChange={(date) => {
+          if (date) {
+            setCalendarValue(date);
+            onChange(date);
+          }
+        }}
+        allowClear={false}
+        placeholder="选择年月"
+        style={{ width: 120 }}
+      />
+    </div>
+  );
+
+  /**
+   * 加载班次基础数据（来自班次管理页面）
+   */
+  useEffect(() => {
+    const query: ShiftGroupQueryRequest = {
+      current: 1,
+      pageSize: 1000,
+      status: 1,
+    };
+    listBaseShiftGroupByPage(query).then((res) => {
+      if (res.code !== 0) {
+        message.error(res.message || '加载班次数据失败');
+        return;
+      }
+      setShiftOptions(res.data?.records || []);
+    });
+  }, []);
+
   const handleSubmit = async (values: any) => {
+    if (!selectedShiftRows.length) {
+      message.error('请选择至少一个班次');
+      return false;
+    }
+
     const hide = message.loading('保存中...');
     try {
-      const payload: WorkCalendarSaveRequest = {
-        id: currentRecord?.id,
-        workDate: values.workDate
-          ? (values.workDate as Dayjs).format('YYYY-MM-DD')
-          : selectedDate,
-        shiftCode: values.shiftCode,
-        shiftName: values.shiftName,
-        shiftStartTime: values.shiftStartTime
-          ? (values.shiftStartTime as Dayjs).format('HH:mm:ss')
-          : '',
-        shiftEndTime: values.shiftEndTime
-          ? (values.shiftEndTime as Dayjs).format('HH:mm:ss')
-          : '',
-        status: values.status ? 1 : 0,
-        remark: values.remark,
-      };
-      const res = await saveWorkCalendar(payload);
-      if (res.code === 0) {
-        message.success('保存成功');
-        setModalVisible(false);
-        setCurrentRecord(undefined);
-        actionRef.current?.reload();
-        return true;
+      const statusVal = values.status ? 1 : 0;
+
+      // 编辑模式：只更新当前这一条
+      if (currentRecord?.id) {
+        const shift = selectedShiftRows[0];
+        const workDate = values.startDate
+          ? dayjs(values.startDate).format('YYYY-MM-DD')
+          : selectedDate;
+        const payload: WorkCalendarSaveRequest = {
+          id: currentRecord.id,
+          workDate,
+          shiftCode: shift.shiftCode || '',
+          shiftName: shift.shiftName || '',
+          shiftStartTime: shift.shiftStartTime || '',
+          shiftEndTime: shift.shiftEndTime || '',
+          status: statusVal,
+          remark: values.remark,
+        };
+        const res = await saveWorkCalendar(payload);
+        if (res.code === 0) {
+          message.success('保存成功');
+          setModalVisible(false);
+          setCurrentRecord(undefined);
+          setSelectedShiftKeys([]);
+          setSelectedShiftRows([]);
+          actionRef.current?.reload();
+          return true;
+        }
+        message.error(res.message || '保存失败');
+        return false;
       }
-      message.error(res.message || '保存失败');
-      return false;
+
+      // 生成模式：按开始日期～结束日期区间生成
+      // Ant Design Pro 默认会把日期字段在 onFinish 里格式化为字符串，这里统一用 dayjs 再包一层
+      const start = values.startDate ? dayjs(values.startDate) : dayjs(selectedDate);
+      const end = values.endDate ? dayjs(values.endDate) : start;
+      if (end.isBefore(start, 'day')) {
+        message.error('结束日期不能早于开始日期');
+        return false;
+      }
+      const workDates: string[] = [];
+      let d = start.startOf('day');
+      const endDay = end.startOf('day');
+      while (!d.isAfter(endDay)) {
+        workDates.push(d.format('YYYY-MM-DD'));
+        d = d.add(1, 'day');
+      }
+
+      for (const dateStr of workDates) {
+        for (const shift of selectedShiftRows) {
+          const payload: WorkCalendarSaveRequest = {
+            workDate: dateStr,
+            shiftCode: shift.shiftCode || '',
+            shiftName: shift.shiftName || '',
+            shiftStartTime: shift.shiftStartTime || '',
+            shiftEndTime: shift.shiftEndTime || '',
+            status: statusVal,
+            remark: values.remark,
+          };
+          const res = await saveWorkCalendar(payload);
+          if (res.code !== 0) {
+            message.error(
+              res.message ||
+                `保存 ${dateStr} 班次 ${
+                  shift.shiftName || shift.shiftCode
+                } 失败`,
+            );
+            return false;
+          }
+        }
+      }
+
+      message.success('保存成功');
+      setModalVisible(false);
+      setCurrentRecord(undefined);
+      setSelectedShiftKeys([]);
+      setSelectedShiftRows([]);
+      actionRef.current?.reload();
+      return true;
     } catch (_e) {
       message.error('保存失败，请重试');
+      console.log(_e)
       return false;
     } finally {
       hide();
@@ -166,6 +295,43 @@ const WorkCalendarPage: React.FC = () => {
     },
   ];
 
+  const shiftColumns: ProColumns<ShiftGroup>[] = [
+    {
+      title: '班次编码',
+      dataIndex: 'shiftCode',
+      valueType: 'text',
+    },
+    {
+      title: '班次名称',
+      dataIndex: 'shiftName',
+      valueType: 'text',
+    },
+    {
+      title: '开始时间',
+      dataIndex: 'shiftStartTime',
+      valueType: 'text',
+    },
+    {
+      title: '结束时间',
+      dataIndex: 'shiftEndTime',
+      valueType: 'text',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      valueType: 'select',
+      valueEnum: {
+        0: { text: '停用', status: 'Default' },
+        1: { text: '启用', status: 'Success' },
+      },
+      render: (_, record) => (
+        <Tag color={record.status === 1 ? 'green' : 'default'}>
+          {record.status === 1 ? '启用' : '停用'}
+        </Tag>
+      ),
+    },
+  ];
+
   return (
     <PageContainer>
       {/* 上半部分：日历控件，按日期管理班次 */}
@@ -181,8 +347,9 @@ const WorkCalendarPage: React.FC = () => {
       >
         <Calendar
           fullscreen={false}
-          value={dayjs(selectedDate)}
+          value={calendarValue}
           onSelect={handleCalendarSelect}
+          headerRender={calendarHeaderRender}
         />
       </Card>
 
@@ -198,10 +365,12 @@ const WorkCalendarPage: React.FC = () => {
             type="primary"
             onClick={() => {
               setCurrentRecord(undefined);
+              setSelectedShiftKeys([]);
+              setSelectedShiftRows([]);
               setModalVisible(true);
             }}
           >
-            新增班次
+            生成班次
           </Button>,
         ]}
         request={async () => {
@@ -229,20 +398,25 @@ const WorkCalendarPage: React.FC = () => {
         pagination={false}
       />
 
-      {/* 新增 / 编辑班次弹窗 */}
+      {/* 生成班次 / 编辑班次弹窗 */}
       <ModalForm
-        title={currentRecord?.id ? '编辑班次' : '新增班次'}
+        title={currentRecord?.id ? '编辑班次' : '生成班次'}
         open={modalVisible}
         modalProps={{
           destroyOnClose: true,
           onCancel: () => {
             setModalVisible(false);
             setCurrentRecord(undefined);
+            setSelectedShiftKeys([]);
+            setSelectedShiftRows([]);
           },
         }}
         initialValues={{
           ...currentRecord,
-          workDate: currentRecord?.workDate
+          startDate: currentRecord?.workDate
+            ? dayjs(currentRecord.workDate)
+            : dayjs(selectedDate),
+          endDate: currentRecord?.workDate
             ? dayjs(currentRecord.workDate)
             : dayjs(selectedDate),
           shiftStartTime: currentRecord?.shiftStartTime
@@ -256,29 +430,45 @@ const WorkCalendarPage: React.FC = () => {
         onFinish={handleSubmit}
       >
         <ProFormDatePicker
-          name="workDate"
-          label="工作日期"
-          rules={[{ required: true, message: '请选择工作日期' }]}
+          name="startDate"
+          label="开始日期"
+          rules={[{ required: true, message: '请选择开始日期' }]}
         />
-        <ProFormText
-          name="shiftCode"
-          label="班次编码"
-          rules={[{ required: true, message: '请输入班次编码' }]}
+        <ProFormDatePicker
+          name="endDate"
+          label="结束日期"
+          dependencies={['startDate']}
+          rules={[
+            { required: true, message: '请选择结束日期' },
+            ({ getFieldValue }: { getFieldValue: (name: string) => Dayjs }) => ({
+              validator(_: unknown, value: Dayjs) {
+                const start = getFieldValue('startDate');
+                if (!value || !start) return Promise.resolve();
+                if (value.isBefore(start, 'day')) {
+                  return Promise.reject(new Error('结束日期不能早于开始日期'));
+                }
+                return Promise.resolve();
+              },
+            }),
+          ]}
         />
-        <ProFormText
-          name="shiftName"
-          label="班次名称"
-          rules={[{ required: true, message: '请输入班次名称' }]}
-        />
-        <ProFormTimePicker
-          name="shiftStartTime"
-          label="开始时间"
-          rules={[{ required: true, message: '请选择开始时间' }]}
-        />
-        <ProFormTimePicker
-          name="shiftEndTime"
-          label="结束时间"
-          rules={[{ required: true, message: '请选择结束时间' }]}
+        <ProTable<ShiftGroup>
+          rowKey="shiftCode"
+          search={false}
+          options={false}
+          pagination={false}
+          dataSource={shiftOptions}
+          columns={shiftColumns}
+          rowSelection={{
+            type: currentRecord?.id ? 'radio' : 'checkbox',
+            selectedRowKeys: selectedShiftKeys,
+            onChange: (keys, rows) => {
+              setSelectedShiftKeys(keys);
+              setSelectedShiftRows(rows as ShiftGroup[]);
+            },
+          }}
+          tableAlertRender={false}
+          tableAlertOptionRender={false}
         />
         <ProFormSwitch
           name="status"
