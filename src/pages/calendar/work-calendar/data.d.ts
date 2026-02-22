@@ -37,6 +37,10 @@ export interface WorkCalendarQueryRequest {
   current?: number;
   pageSize?: number;
   workDate?: string;
+  /** 工作日期范围-开始（YYYY-MM-DD），用于日历按月拉取 */
+  workDateStart?: string;
+  /** 工作日期范围-结束（YYYY-MM-DD），用于日历按月拉取 */
+  workDateEnd?: string;
   shiftCode?: string;
   shiftName?: string;
   status?: number;

@@ -37,6 +37,10 @@ const WorkCalendarPage: React.FC = () => {
   const [shiftOptions, setShiftOptions] = useState<ShiftGroup[]>([]);
   const [selectedShiftKeys, setSelectedShiftKeys] = useState<React.Key[]>([]);
   const [selectedShiftRows, setSelectedShiftRows] = useState<ShiftGroup[]>([]);
+  /** 当前展示月份内每日班次数量，用于日历格子展示 */
+  const [dateShiftCountMap, setDateShiftCountMap] = useState<Record<string, number>>({});
+  /** 保存/删除后递增，用于触发日历月份数据重新拉取 */
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
 
   // 日历仅用于选择要查看的日期，刷新下方当日班次列表
   const handleCalendarSelect = (value: Dayjs) => {
@@ -110,6 +114,32 @@ const WorkCalendarPage: React.FC = () => {
     });
   }, []);
 
+  /**
+   * 按当前日历月份拉取班次数据，汇总每日班次数量供日历格子展示
+   */
+  useEffect(() => {
+    const start = calendarValue.startOf('month');
+    const end = calendarValue.endOf('month');
+    const query: WorkCalendarQueryRequest = {
+      current: 1,
+      pageSize: 500,
+      workDateStart: start.format('YYYY-MM-DD'),
+      workDateEnd: end.format('YYYY-MM-DD'),
+    };
+    listWorkCalendarByPage(query).then((res) => {
+      if (res.code !== 0) return;
+      const list = res.data?.records || [];
+      const map: Record<string, number> = {};
+      list.forEach((item) => {
+        const d = item.workDate ? dayjs(item.workDate).format('YYYY-MM-DD') : '';
+        if (d) {
+          map[d] = (map[d] || 0) + 1;
+        }
+      });
+      setDateShiftCountMap(map);
+    });
+  }, [calendarValue.year(), calendarValue.month(), calendarRefreshKey]);
+
   const handleSubmit = async (values: any) => {
     if (!selectedShiftRows.length) {
       message.error('请选择至少一个班次');
@@ -144,6 +174,7 @@ const WorkCalendarPage: React.FC = () => {
           setSelectedShiftKeys([]);
           setSelectedShiftRows([]);
           actionRef.current?.reload();
+          setCalendarRefreshKey((k) => k + 1);
           return true;
         }
         message.error(res.message || '保存失败');
@@ -196,6 +227,7 @@ const WorkCalendarPage: React.FC = () => {
       setSelectedShiftKeys([]);
       setSelectedShiftRows([]);
       actionRef.current?.reload();
+      setCalendarRefreshKey((k) => k + 1);
       return true;
     } catch (_e) {
       message.error('保存失败，请重试');
@@ -217,6 +249,7 @@ const WorkCalendarPage: React.FC = () => {
       if (res.code === 0 && res.data) {
         message.success('删除成功');
         actionRef.current?.reload();
+        setCalendarRefreshKey((k) => k + 1);
       } else {
         message.error(res.message || '删除失败');
       }
@@ -350,6 +383,42 @@ const WorkCalendarPage: React.FC = () => {
           value={calendarValue}
           onSelect={handleCalendarSelect}
           headerRender={calendarHeaderRender}
+          fullCellRender={(current, info) => {
+            const dateStr = current.format('YYYY-MM-DD');
+            const count = dateShiftCountMap[dateStr] ?? 0;
+            const isToday = current.isSame(dayjs(), 'day');
+            return (
+              <div
+                className={`ant-picker-cell-inner ant-picker-calendar-date${isToday ? ' ant-picker-calendar-date-today' : ''}`}
+                style={{ position: 'relative' }}
+              >
+                <div className="ant-picker-calendar-date-value">
+                  {String(current.date()).padStart(2, '0')}
+                </div>
+                <div className="ant-picker-calendar-date-content" />
+                {count > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      right: -15,
+                      top: -5,
+                      minWidth: 14,
+                      height: 14,
+                      lineHeight: '14px',
+                      fontSize: 10,
+                      textAlign: 'center',
+                      color: '#fff',
+                      background: '#1890ff',
+                      borderRadius: 7,
+                      padding: '0 3px',
+                    }}
+                  >
+                    {count}
+                  </span>
+                )}
+              </div>
+            );
+          }}
         />
       </Card>
 
