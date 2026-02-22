@@ -69,5 +69,7 @@ export default {
   'menu.calendar': '日历管理',
   'menu.calendar.work-calendar': '工作日历',
   'menu.calendar.shift-group': '班次管理',
+  'menu.logs': '日志',
+  'menu.logs.api-replay': '接口重放',
 
 };

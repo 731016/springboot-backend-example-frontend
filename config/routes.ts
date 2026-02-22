@@ -369,6 +369,18 @@ export default [
     ],
   },
   {
+    path: '/logs',
+    name: 'logs',
+    icon: 'FileTextOutlined',
+    routes: [
+      {
+        path: '/logs/api-replay',
+        name: 'api-replay',
+        component: './logs/api-replay',
+      },
+    ],
+  },
+  {
     path: '/admin',
     name: 'admin',
     icon: 'crown',
