@@ -96,6 +96,17 @@ export interface CollectedData {
 }
 
 /**
+ * 数据类型：1-正常数据，2-非统计数据
+ */
+export const DATA_TYPE_NORMAL = 1;
+export const DATA_TYPE_NON_STATISTICAL = 2;
+
+export const DataTypeLabel: Record<number, string> = {
+  [DATA_TYPE_NORMAL]: '正常数据',
+  [DATA_TYPE_NON_STATISTICAL]: '非统计数据',
+};
+
+/**
  * 采集数据明细
  */
 export interface DataDetail {
@@ -105,6 +116,8 @@ export interface DataDetail {
   value?: number;
   attributeName?: string;
   statisticsId?: number;
+  /** 数据类型：1-正常数据，2-非统计数据 */
+  dataType?: number;
   createTime?: string;
 }
 

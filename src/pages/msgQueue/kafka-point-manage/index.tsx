@@ -29,6 +29,11 @@ import {
   stopCollection,
 } from './service';
 
+const DataTypeLabel: Record<number, string> = {
+  1: '正常数据',
+  2: '非统计数据',
+};
+
 const KafkaPointManagePage: React.FC = () => {
   const actionRef = useRef<ActionType>(null);
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
@@ -959,6 +964,13 @@ const KafkaPointManagePage: React.FC = () => {
                 dataIndex: 'attributeName',
                 key: 'attributeName',
               },
+              {
+                title: '数据类型',
+                dataIndex: 'dataType',
+                key: 'dataType',
+                render: (dataType: number) =>
+                  dataType != null ? DataTypeLabel[dataType] ?? '-' : '-',
+              },
             ]}
             dataSource={dataDetails}
             rowKey="id"
@@ -1165,6 +1177,13 @@ const KafkaPointManagePage: React.FC = () => {
                     title: '属性名称',
                     dataIndex: 'attributeName',
                     key: 'attributeName',
+                  },
+                  {
+                    title: '数据类型',
+                    dataIndex: 'dataType',
+                    key: 'dataType',
+                    render: (dataType: number) =>
+                      dataType != null ? DataTypeLabel[dataType] ?? '-' : '-',
                   },
                 ]}
                 dataSource={realtimeData}
