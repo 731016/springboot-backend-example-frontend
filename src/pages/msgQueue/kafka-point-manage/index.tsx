@@ -1,5 +1,5 @@
 // src/pages/admin/kafka-point-manage/index.tsx
-import type { ActionType, ProColumns } from '@ant-design/pro-components';
+import type {ActionType, ProColumns} from '@ant-design/pro-components';
 import {
   ModalForm,
   PageContainer,
@@ -8,8 +8,8 @@ import {
   ProFormText,
   ProTable,
 } from '@ant-design/pro-components';
-import { Button, Descriptions, message, Modal, Space, Table } from 'antd';
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+import {Button, Descriptions, message, Modal, Space, Table} from 'antd';
+import React, {useRef, useState, useMemo, useEffect} from 'react';
 import ReactECharts from 'echarts-for-react';
 import type {
   PointConfig,
@@ -27,16 +27,20 @@ import {
   listPointConfigByPage,
   startCollection,
   stopCollection,
+  updatePointConfig,
 } from './service';
 
+/** 数据类型展示文案：1-正常数据，2-非统计数据，3-超过上下限制数据 */
 const DataTypeLabel: Record<number, string> = {
   1: '正常数据',
   2: '非统计数据',
+  3: '超过上下限制数据',
 };
 
 const KafkaPointManagePage: React.FC = () => {
   const actionRef = useRef<ActionType>(null);
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
+  const [editingPoint, setEditingPoint] = useState<PointConfig | undefined>();
   const [statusModalVisible, setStatusModalVisible] = useState<boolean>(false);
   const [dataDetailsModalVisible, setDataDetailsModalVisible] = useState<boolean>(false);
   const [statisticsModalVisible, setStatisticsModalVisible] = useState<boolean>(false);
@@ -421,7 +425,7 @@ const KafkaPointManagePage: React.FC = () => {
         const wsHost = 'http://localhost:8107/api/notification';
         const wsTopic = '/topic/kafka/data';
 
-        console.log('WebSocket 连接配置:', { wsHost, wsTopic, pointCode });
+        console.log('WebSocket 连接配置:', {wsHost, wsTopic, pointCode});
 
         console.log('开始连接 WebSocket:', wsHost);
         const socket = new SockJS(wsHost);
@@ -442,43 +446,43 @@ const KafkaPointManagePage: React.FC = () => {
           try {
             const subscription = stompClient.subscribe(wsTopic, (response: any) => {
               console.log('收到 WebSocket 消息:', response.body);
-            try {
-              const data: DataDetail = JSON.parse(response.body);
-              console.log('解析后的数据:', data);
-              console.log('当前点位编码:', pointCode, '收到点位编码:', data.pointCode);
+              try {
+                const data: DataDetail = JSON.parse(response.body);
+                console.log('解析后的数据:', data);
+                console.log('当前点位编码:', pointCode, '收到点位编码:', data.pointCode);
 
-              // 只接收当前点位的数据
-              if (data.pointCode === pointCode) {
-                console.log('点位匹配，更新数据');
-                setRealtimeData((prev) => {
-                  const now = Date.now();
-                  const fiveMinutesAgo = now - 5 * 60 * 1000;
-                  // 过滤出最近5分钟的数据
-                  const filtered = [
-                    ...prev,
-                    data,
-                  ].filter((item) => {
-                    if (!item.collectTime) return false;
-                    const collectTime = new Date(item.collectTime).getTime();
-                    return collectTime >= fiveMinutesAgo;
+                // 只接收当前点位的数据
+                if (data.pointCode === pointCode) {
+                  console.log('点位匹配，更新数据');
+                  setRealtimeData((prev) => {
+                    const now = Date.now();
+                    const fiveMinutesAgo = now - 5 * 60 * 1000;
+                    // 过滤出最近5分钟的数据
+                    const filtered = [
+                      ...prev,
+                      data,
+                    ].filter((item) => {
+                      if (!item.collectTime) return false;
+                      const collectTime = new Date(item.collectTime).getTime();
+                      return collectTime >= fiveMinutesAgo;
+                    });
+                    // 按时间降序排序（最新的在最上面）
+                    const sorted = filtered.sort((a, b) => {
+                      const timeA = a.collectTime ? new Date(a.collectTime).getTime() : 0;
+                      const timeB = b.collectTime ? new Date(b.collectTime).getTime() : 0;
+                      return timeB - timeA; // 降序：timeB - timeA
+                    });
+                    console.log('更新后的数据量:', sorted.length);
+                    return sorted;
                   });
-                  // 按时间降序排序（最新的在最上面）
-                  const sorted = filtered.sort((a, b) => {
-                    const timeA = a.collectTime ? new Date(a.collectTime).getTime() : 0;
-                    const timeB = b.collectTime ? new Date(b.collectTime).getTime() : 0;
-                    return timeB - timeA; // 降序：timeB - timeA
-                  });
-                  console.log('更新后的数据量:', sorted.length);
-                  return sorted;
-                });
-              } else {
-                console.log('点位不匹配，忽略数据');
+                } else {
+                  console.log('点位不匹配，忽略数据');
+                }
+              } catch (error) {
+                console.error('解析 WebSocket 消息失败:', error, '原始消息:', response.body);
               }
-            } catch (error) {
-              console.error('解析 WebSocket 消息失败:', error, '原始消息:', response.body);
-            }
             });
-            
+
             console.log('订阅成功，订阅对象:', subscription);
             // 保存订阅引用，以便后续取消订阅
             (stompClientRef.current as any).subscription = subscription;
@@ -681,24 +685,24 @@ const KafkaPointManagePage: React.FC = () => {
       title: '是否主点',
       dataIndex: 'isMainPoint',
       valueEnum: {
-        0: { text: '否' },
-        1: { text: '是' },
+        0: {text: '否'},
+        1: {text: '是'},
       },
     },
     {
       title: '状态',
       dataIndex: 'status',
       valueEnum: {
-        0: { text: '禁用', status: 'Default' },
-        1: { text: '启用', status: 'Success' },
+        0: {text: '禁用', status: 'Default'},
+        1: {text: '启用', status: 'Success'},
       },
     },
     {
       title: '运行状态',
       dataIndex: 'runningStatus',
       valueEnum: {
-        0: { text: '停止', status: 'Default' },
-        1: { text: '运行中', status: 'Success' },
+        0: {text: '停止', status: 'Default'},
+        1: {text: '运行中', status: 'Success'},
       },
     },
     {
@@ -712,6 +716,15 @@ const KafkaPointManagePage: React.FC = () => {
       valueType: 'option',
       render: (_, record) => (
         <Space size="small" wrap>
+          <a
+            key="edit"
+            onClick={() => {
+              setEditingPoint(record);
+              setCreateModalVisible(true);
+            }}
+          >
+            编辑
+          </a>
           <a
             key="start"
             onClick={() => {
@@ -767,7 +780,7 @@ const KafkaPointManagePage: React.FC = () => {
 
   return (
     <PageContainer>
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space direction="vertical" size="middle" style={{width: '100%'}}>
         <ProTable<PointConfig>
           headerTitle="采集点管理"
           actionRef={actionRef}
@@ -833,21 +846,54 @@ const KafkaPointManagePage: React.FC = () => {
       </Space>
 
       <ModalForm
-        title="新增采集点"
+        title={editingPoint ? '编辑采集点' : '新增采集点'}
         width="480px"
         open={createModalVisible}
         onOpenChange={setCreateModalVisible}
-        modalProps={{ destroyOnClose: true }}
+        modalProps={{destroyOnClose: true}}
+        initialValues={
+          editingPoint
+            ? {
+              ...editingPoint,
+              isMainPoint: editingPoint.isMainPoint === 1,
+              status: editingPoint.status === 1,
+            }
+            : {
+              status: true,
+            }
+        }
         onFinish={async (value) => {
           // 将 Boolean 转换为 Integer (0/1)
-          const submitData: AddPointConfigRequest = {
+          const submitData: any = {
+            ...editingPoint,
             ...value,
             isMainPoint: value.isMainPoint ? 1 : 0,
             status: value.status ? 1 : 0,
-          } as AddPointConfigRequest;
-          const success = await handleAdd(submitData);
+          };
+
+          let success = false;
+          if (editingPoint && editingPoint.id) {
+            const hide = message.loading('正在更新采集点');
+            try {
+              const res = await updatePointConfig(submitData as PointConfig);
+              hide();
+              if (res.code === 0 && res.data) {
+                message.success('更新成功');
+                success = true;
+              } else {
+                message.error(res.message || '更新失败');
+              }
+            } catch (_e) {
+              hide();
+              message.error('更新失败，请重试');
+            }
+          } else {
+            success = await handleAdd(submitData as AddPointConfigRequest);
+          }
+
           if (success) {
             setCreateModalVisible(false);
+            setEditingPoint(undefined);
             if (actionRef.current) {
               actionRef.current.reload();
             }
@@ -857,28 +903,28 @@ const KafkaPointManagePage: React.FC = () => {
         <ProFormText
           name="pointCode"
           label="采集点编码"
-          rules={[{ required: true, message: '请输入采集点编码' }]}
+          rules={[{required: true, message: '请输入采集点编码'}]}
         />
         <ProFormText
           name="pointName"
           label="采集点名称"
-          rules={[{ required: true, message: '请输入采集点名称' }]}
+          rules={[{required: true, message: '请输入采集点名称'}]}
         />
-        <ProFormText name="validUrl" label="校验URL" />
+        <ProFormText name="validUrl" label="校验URL"/>
         <ProFormText
           name="dataUrl"
           label="数据URL"
-          rules={[{ required: true, message: '请输入数据URL' }]}
+          rules={[{required: true, message: '请输入数据URL'}]}
         />
-        <ProFormDigit name="minLimit" label="最小限值" fieldProps={{ min: -99999 }}/>
-        <ProFormDigit name="maxLimit" label="最大限值" fieldProps={{ min: -99999 }}/>
+        <ProFormDigit name="minLimit" label="最小限值" fieldProps={{min: -99999}}/>
+        <ProFormDigit name="maxLimit" label="最大限值" fieldProps={{min: -99999}}/>
         <ProFormDigit
           name="intervalSeconds"
           label="采集间隔(秒)"
-          fieldProps={{ min: 1 }}
-          rules={[{ required: true, message: '请输入采集间隔' }]}
+          fieldProps={{min: 1}}
+          rules={[{required: true, message: '请输入采集间隔'}]}
         />
-        <ProFormSwitch name="isMainPoint" label="是否主点" />
+        <ProFormSwitch name="isMainPoint" label="是否主点"/>
         <ProFormSwitch
           name="status"
           label="是否启用"
@@ -899,7 +945,7 @@ const KafkaPointManagePage: React.FC = () => {
         width={800}
       >
         {loadingStatus ? (
-          <div style={{ textAlign: 'center', padding: '20px' }}>加载中...</div>
+          <div style={{textAlign: 'center', padding: '20px'}}>加载中...</div>
         ) : currentStatus ? (
           <Descriptions column={2} bordered>
             <Descriptions.Item label="运行中">
@@ -933,7 +979,7 @@ const KafkaPointManagePage: React.FC = () => {
         width={1000}
       >
         {loadingDataDetails ? (
-          <div style={{ textAlign: 'center', padding: '20px' }}>加载中...</div>
+          <div style={{textAlign: 'center', padding: '20px'}}>加载中...</div>
         ) : dataDetails.length > 0 ? (
           <Table
             columns={[
@@ -974,6 +1020,24 @@ const KafkaPointManagePage: React.FC = () => {
             ]}
             dataSource={dataDetails}
             rowKey="id"
+            onRow={(record) => {
+              let backgroundColor: string | undefined;
+              if (record.dataType === 2) {
+                // 非统计数据 - 红色
+                backgroundColor = '#fff1f0';
+              } else if (record.dataType === 3) {
+                // 超过上下限制数据 - 黄色
+                backgroundColor = '#fffbe6';
+              } else if (record.dataType === 1) {
+                // 正常数据 - 绿色
+                backgroundColor = '#f6ffed';
+              }
+              return {
+                style: {
+                  backgroundColor,
+                },
+              };
+            }}
             pagination={{
               pageSize: 10,
               showSizeChanger: true,
@@ -1010,19 +1074,19 @@ const KafkaPointManagePage: React.FC = () => {
         width={1400}
       >
         {loadingStatistics || loadingChartData ? (
-          <div style={{ textAlign: 'center', padding: '20px' }}>加载中...</div>
+          <div style={{textAlign: 'center', padding: '20px'}}>加载中...</div>
         ) : (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space direction="vertical" size="large" style={{width: '100%'}}>
             {/* 折线图 */}
             {chartOption && chartDataDetails.length > 0 && (
-              <div style={{ marginBottom: 24, width: '100%' }}>
-                <h3 style={{ marginBottom: 16 }}>
+              <div style={{marginBottom: 24, width: '100%'}}>
+                <h3 style={{marginBottom: 16}}>
                   采集数据趋势图 {currentPointCode ? `（${currentPointCode}）` : ''}
                 </h3>
                 <ReactECharts
                   option={chartOption}
-                  style={{ width: '100%', height: '400px' }}
-                  opts={{ renderer: 'svg' }}
+                  style={{width: '100%', height: '400px'}}
+                  opts={{renderer: 'svg'}}
                 />
               </div>
             )}
@@ -1030,61 +1094,61 @@ const KafkaPointManagePage: React.FC = () => {
             {/* 统计数据表格 */}
             {dataStatistics.length > 0 ? (
               <div>
-                <h3 style={{ marginBottom: 16 }}>统计数据列表</h3>
+                <h3 style={{marginBottom: 16}}>统计数据列表</h3>
                 <Table
                   columns={[
-              {
-                title: 'ID',
-                dataIndex: 'id',
-                key: 'id',
-                width: 80,
-              },
-              {
-                title: '采集点编码',
-                dataIndex: 'pointCode',
-                key: 'pointCode',
-              },
-              {
-                title: '开始时间',
-                dataIndex: 'startTime',
-                key: 'startTime',
-              },
-              {
-                title: '结束时间',
-                dataIndex: 'endTime',
-                key: 'endTime',
-              },
-              {
-                title: '最大值',
-                dataIndex: 'maximumValue',
-                key: 'maximumValue',
-                render: (value: number) => value?.toFixed(2) || '-',
-              },
-              {
-                title: '最小值',
-                dataIndex: 'minimumValue',
-                key: 'minimumValue',
-                render: (value: number) => value?.toFixed(2) || '-',
-              },
-              {
-                title: '平均值',
-                dataIndex: 'averageValue',
-                key: 'averageValue',
-                render: (value: number) => value?.toFixed(2) || '-',
-              },
-              {
-                title: '状态',
-                dataIndex: 'status',
-                key: 'status',
-                render: (status: number) => {
-                  const statusMap: Record<number, string> = {
-                    0: '未开始',
-                    1: '进行中',
-                    2: '已完成',
-                  };
-                  return statusMap[status] || '-';
-                },
-              },
+                    {
+                      title: 'ID',
+                      dataIndex: 'id',
+                      key: 'id',
+                      width: 80,
+                    },
+                    {
+                      title: '采集点编码',
+                      dataIndex: 'pointCode',
+                      key: 'pointCode',
+                    },
+                    {
+                      title: '开始时间',
+                      dataIndex: 'startTime',
+                      key: 'startTime',
+                    },
+                    {
+                      title: '结束时间',
+                      dataIndex: 'endTime',
+                      key: 'endTime',
+                    },
+                    {
+                      title: '最大值',
+                      dataIndex: 'maximumValue',
+                      key: 'maximumValue',
+                      render: (value: number) => value?.toFixed(2) || '-',
+                    },
+                    {
+                      title: '最小值',
+                      dataIndex: 'minimumValue',
+                      key: 'minimumValue',
+                      render: (value: number) => value?.toFixed(2) || '-',
+                    },
+                    {
+                      title: '平均值',
+                      dataIndex: 'averageValue',
+                      key: 'averageValue',
+                      render: (value: number) => value?.toFixed(2) || '-',
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      key: 'status',
+                      render: (status: number) => {
+                        const statusMap: Record<number, string> = {
+                          0: '未开始',
+                          1: '进行中',
+                          2: '已完成',
+                        };
+                        return statusMap[status] || '-';
+                      },
+                    },
                   ]}
                   dataSource={dataStatistics}
                   rowKey="id"
@@ -1116,27 +1180,27 @@ const KafkaPointManagePage: React.FC = () => {
         width={1400}
         destroyOnClose
       >
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        <Space direction="vertical" size="large" style={{width: '100%'}}>
           {/* 连接状态 */}
-          <div style={{ textAlign: 'right' }}>
-            <span style={{ marginRight: 16 }}>
+          <div style={{textAlign: 'right'}}>
+            <span style={{marginRight: 16}}>
               连接状态: {isRealtimeConnected ? (
-                <span style={{ color: '#52c41a' }}>已连接</span>
-              ) : (
-                <span style={{ color: '#ff4d4f' }}>未连接</span>
-              )}
+              <span style={{color: '#52c41a'}}>已连接</span>
+            ) : (
+              <span style={{color: '#ff4d4f'}}>未连接</span>
+            )}
             </span>
             <span>数据量: {realtimeData.length} 条（最近5分钟）</span>
           </div>
 
           {/* 实时折线图 */}
           {realtimeChartOption && realtimeData.length > 0 && (
-            <div style={{ marginBottom: 24, width: '100%' }}>
-              <h3 style={{ marginBottom: 16 }}>实时数据趋势图</h3>
+            <div style={{marginBottom: 24, width: '100%'}}>
+              <h3 style={{marginBottom: 16}}>实时数据趋势图</h3>
               <ReactECharts
                 option={realtimeChartOption}
-                style={{ width: '100%', height: '400px' }}
-                opts={{ renderer: 'svg' }}
+                style={{width: '100%', height: '400px'}}
+                opts={{renderer: 'svg'}}
               />
             </div>
           )}
@@ -1144,7 +1208,7 @@ const KafkaPointManagePage: React.FC = () => {
           {/* 实时数据表格 */}
           {realtimeData.length > 0 ? (
             <div>
-              <h3 style={{ marginBottom: 16 }}>实时数据列表</h3>
+              <h3 style={{marginBottom: 16}}>实时数据列表</h3>
               <Table
                 columns={[
                   {
@@ -1188,17 +1252,32 @@ const KafkaPointManagePage: React.FC = () => {
                 ]}
                 dataSource={realtimeData}
                 rowKey={(record, index) => record.id?.toString() || `realtime-${index}`}
+                onRow={(record) => {
+                  let backgroundColor: string | undefined;
+                  if (record.dataType === 2) {
+                    backgroundColor = '#fff1f0';
+                  } else if (record.dataType === 3) {
+                    backgroundColor = '#fffbe6';
+                  } else if (record.dataType === 1) {
+                    backgroundColor = '#f6ffed';
+                  }
+                  return {
+                    style: {
+                      backgroundColor,
+                    },
+                  };
+                }}
                 pagination={{
                   pageSize: 20,
                   showSizeChanger: true,
                   showQuickJumper: true,
                 }}
                 size="small"
-                scroll={{ y: 400 }}
+                scroll={{y: 400}}
               />
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{textAlign: 'center', padding: '40px'}}>
               暂无实时数据，等待数据推送...
             </div>
           )}

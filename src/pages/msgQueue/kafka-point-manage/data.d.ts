@@ -42,6 +42,13 @@ export interface AddPointConfigRequest {
 }
 
 /**
+ * 更新采集点请求
+ */
+export interface UpdatePointConfigRequest extends AddPointConfigRequest {
+  id: number;
+}
+
+/**
  * 采集点配置查询请求
  */
 export interface PointConfigQueryRequest {
@@ -100,10 +107,12 @@ export interface CollectedData {
  */
 export const DATA_TYPE_NORMAL = 1;
 export const DATA_TYPE_NON_STATISTICAL = 2;
+export const DATA_TYPE_MORE_THAN_LIMIT = 3;
 
 export const DataTypeLabel: Record<number, string> = {
   [DATA_TYPE_NORMAL]: '正常数据',
   [DATA_TYPE_NON_STATISTICAL]: '非统计数据',
+  [DATA_TYPE_MORE_THAN_LIMIT]: '超过上下限制数据',
 };
 
 /**

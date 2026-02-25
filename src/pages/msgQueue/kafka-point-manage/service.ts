@@ -49,6 +49,21 @@ export async function listPointConfigByPage(
 }
 
 /**
+ * 更新采集点
+ * POST /kafka/kafkaPointConfig/point/update
+ */
+export async function updatePointConfig(
+  data: PointConfig,
+  options?: Record<string, any>,
+) {
+  return request<ApiResponse<boolean>>('/api/kafka/kafkaPointConfig/point/update', {
+    method: 'POST',
+    data,
+    ...(options || {}),
+  });
+}
+
+/**
  * 启动采集任务
  * POST /kafka/dataCollect/start/{pointCode}
  */

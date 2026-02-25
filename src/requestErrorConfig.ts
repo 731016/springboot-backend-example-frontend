@@ -1,4 +1,4 @@
-﻿import type {RequestOptions} from '@@/plugin-request/request';
+import type {RequestOptions} from '@@/plugin-request/request';
 import type {RequestConfig} from '@umijs/max';
 import {message, notification} from 'antd';
 import {stringify} from "querystring";
@@ -49,20 +49,20 @@ export const errorConfig: RequestConfig = {
       if (error.name === 'BizError') {
         const errorInfo: ResponseStructure | undefined = error.info;
         if (errorInfo) {
-          const {message, code} = errorInfo;
+          const { message: msg, code } = errorInfo;
           switch (errorInfo.showType) {
             case ErrorShowType.SILENT:
               // do nothing
               break;
             case ErrorShowType.WARN_MESSAGE:
-              _antd.message.warning(message);
+              message.warning(msg);
               break;
             case ErrorShowType.ERROR_MESSAGE:
-              _antd.message.error(message);
+              message.error(msg);
               break;
             case ErrorShowType.NOTIFICATION:
               notification.open({
-                description: message,
+                description: msg,
                 message: code,
               });
               break;
@@ -70,59 +70,58 @@ export const errorConfig: RequestConfig = {
               // TODO: redirect
               break;
             default:
-              _antd.message.error(message);
+              message.error(msg);
           }
         }
       } else if (error.response) {
-        // Axios 的错误
-        // 请求成功发出且服务器也响应了状态码，但状态代码超出了 2xx 的范围
-        if (error && error.response) {
-          switch (error.response.status) {
-            case 400:
-              error.message = '请求错误(400)';
-              break;
-            case 401:
-              error.message = '未授权，请重新登录(401)';
-              break;
-            case 403:
-              error.message = '拒绝访问(403)';
-              break;
-            case 404:
-              error.message = '请求出错(404)';
-              break;
-            case 408:
-              error.message = '请求超时(408)';
-              break;
-            case 4003:
-              error.message = 'token失效,请重新登录';
-              localStorage.removeItem('token');
-              location.reload();
-              break;
-            case 500:
-              error.message = '服务器错误(500)';
-              break;
-            case 501:
-              error.message = '服务未实现(501)';
-              break;
-            case 502:
-              error.message = '网络错误(502)';
-              break;
-            case 503:
-              error.message = '服务不可用(503)';
-              break;
-            case 504:
-              error.message = '网络超时(504)';
-              break;
-            case 505:
-              error.message = 'HTTP版本不受支持(505)';
-              break;
-            default:
-              error.message = '连接出错' + (error.response.status);
-          }
-        } else {
-          error.message = '连接服务器失败!'
+        // 请求成功发出且服务器返回了非 2xx 状态码
+        const status = error.response.status;
+        switch (status) {
+          case 400:
+            error.message = '请求错误(400)';
+            break;
+          case 401:
+            error.message = '未授权，请重新登录(401)';
+            break;
+          case 403:
+            error.message = '拒绝访问(403)';
+            break;
+          case 404:
+            error.message = '请求资源不存在(404)';
+            break;
+          case 408:
+            error.message = '请求超时(408)';
+            break;
+          case 4003:
+            // 自定义状态码：token 失效，清除后跳转登录
+            error.message = '登录已失效，请重新登录';
+            localStorage.removeItem('token');
+            location.reload();
+            break;
+          case 500:
+            error.message = '服务器内部错误(500)';
+            break;
+          case 501:
+            error.message = '服务未实现(501)';
+            break;
+          case 502:
+            error.message = '上游服务不可用(502)，请检查服务是否已启动';
+            break;
+          case 503:
+            error.message = '服务暂不可用(503)';
+            break;
+          case 504:
+            error.message = '服务未响应或网络超时(504)，请检查服务是否已启动';
+            break;
+          case 505:
+            error.message = 'HTTP 版本不受支持(505)';
+            break;
+          default:
+            error.message = `连接出错(${status})`;
         }
-        message.error(error.message);
+        if (status !== 4003) {
+          message.error(error.message);
+        }
       } else if (error.request) {
         // 请求已经成功发起，但没有收到响应
         // \`error.request\` 在浏览器中是 XMLHttpRequest 的实例，
