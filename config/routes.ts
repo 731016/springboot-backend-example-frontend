@@ -327,6 +327,11 @@ export default [
         name: 'server-monitor',
         component: './job/server-monitor',
       },
+      {
+        path: '/job/event-queue',
+        name: 'event-queue',
+        component: './job/event-queue',
+      },
     ]
   },
   {

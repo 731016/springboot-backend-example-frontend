@@ -62,6 +62,7 @@ export default {
   'menu.job': '任务调度',
   'menu.job.job-manage': '定时任务管理',
   'menu.job.server-monitor': 'websocket管理',
+  'menu.job.event-queue': '事件队列监控',
   'menu.msgQueue': '消息队列',
   'menu.msgQueue.kafka-message': 'kafka发送消息',
   'menu.msgQueue.kafka-point-manage': '采集点位管理',

@@ -1,6 +1,6 @@
 // src/pages/job-manage/index.tsx
-import { PlusOutlined, ClockCircleOutlined } from '@ant-design/icons';
-import type { ActionType, ProColumns } from '@ant-design/pro-components';
+import {PlusOutlined, ClockCircleOutlined} from '@ant-design/icons';
+import type {ActionType, ProColumns} from '@ant-design/pro-components';
 import {
   ModalForm,
   PageContainer,
@@ -9,9 +9,9 @@ import {
   DrawerForm,
   ProDescriptions,
 } from '@ant-design/pro-components';
-import { Button, message, Popconfirm, Modal } from 'antd';
-import React, { useRef, useState } from 'react';
-import type { JobAndTrigger, JobForm } from './data';
+import {Button, message, Popconfirm, Modal, Tag} from 'antd';
+import React, {useRef, useState} from 'react';
+import type {JobAndTrigger, JobForm} from './data';
 import {
   addJob,
   deleteJob,
@@ -28,7 +28,7 @@ import {
 const handleAdd = async (fields: JobForm) => {
   const hide = message.loading('正在添加');
   try {
-    const res = await addJob({ ...fields });
+    const res = await addJob({...fields});
     hide();
     if (res.code === 0) {
       message.success('添加成功');
@@ -136,7 +136,7 @@ const handleResume = async (record: JobAndTrigger) => {
 const handleUpdateCron = async (fields: JobForm) => {
   const hide = message.loading('正在修改');
   try {
-    const res = await updateCronJob({ ...fields });
+    const res = await updateCronJob({...fields});
     hide();
     if (res.code === 0) {
       message.success('修改成功');
@@ -169,7 +169,7 @@ const handleQueryNextFireTimes = async (record: JobAndTrigger) => {
         content: (
           <div>
             {res.data.map((time: string, index: number) => (
-              <p key={index} style={{ marginBottom: 8 }}>
+              <p key={index} style={{marginBottom: 8}}>
                 {new Date(time).toLocaleString('zh-CN', {
                   year: 'numeric',
                   month: '2-digit',
@@ -290,16 +290,16 @@ const JobManagePage: React.FC = () => {
       render: (_, record) => {
         const state = record.triggerState || '';
         const stateMap: Record<string, { text: string; color: string }> = {
-          WAITING: { text: '等待中', color: 'default' },
-          ACQUIRED: { text: '已获取', color: 'processing' },
-          EXECUTING: { text: '执行中', color: 'processing' },
-          COMPLETE: { text: '已完成', color: 'success' },
-          BLOCKED: { text: '阻塞', color: 'error' },
-          ERROR: { text: '错误', color: 'error' },
-          PAUSED: { text: '已暂停', color: 'warning' },
-          PAUSED_BLOCKED: { text: '暂停阻塞', color: 'warning' },
+          WAITING: {text: '等待中', color: 'default'},
+          ACQUIRED: {text: '已获取', color: 'processing'},
+          EXECUTING: {text: '执行中', color: 'processing'},
+          COMPLETE: {text: '已完成', color: 'success'},
+          BLOCKED: {text: '阻塞', color: 'error'},
+          ERROR: {text: '错误', color: 'error'},
+          PAUSED: {text: '已暂停', color: 'warning'},
+          PAUSED_BLOCKED: {text: '暂停阻塞', color: 'warning'},
         };
-        const stateInfo = stateMap[state] || { text: state, color: 'default' };
+        const stateInfo = stateMap[state] || {text: state, color: 'default'};
         return <Tag color={stateInfo.color}>{stateInfo.text}</Tag>;
       },
     },
@@ -363,7 +363,7 @@ const JobManagePage: React.FC = () => {
             handleQueryNextFireTimes(record);
           }}
         >
-          <ClockCircleOutlined /> 下次执行
+          <ClockCircleOutlined/> 下次执行
         </a>,
         <Popconfirm
           key="delete"
@@ -375,7 +375,7 @@ const JobManagePage: React.FC = () => {
             }
           }}
         >
-          <a style={{ color: 'red' }}>删除</a>
+          <a style={{color: 'red'}}>删除</a>
         </Popconfirm>,
       ],
     },
@@ -398,7 +398,7 @@ const JobManagePage: React.FC = () => {
               setCreateModalVisible(true);
             }}
           >
-            <PlusOutlined /> 新建任务
+            <PlusOutlined/> 新建任务
           </Button>,
         ]}
         request={async (params) => {
@@ -427,7 +427,7 @@ const JobManagePage: React.FC = () => {
         width="500px"
         visible={createModalVisible}
         onVisibleChange={setCreateModalVisible}
-        modalProps={{ destroyOnClose: true }}
+        modalProps={{destroyOnClose: true}}
         onFinish={async (value) => {
           const success = await handleAdd(value as JobForm);
           if (success) {
@@ -478,22 +478,22 @@ const JobManagePage: React.FC = () => {
                 // 基本格式检查：6或7个字段，用空格分隔
                 const trimmed = value.trim();
                 const fields = trimmed.split(/\s+/);
-                
+
                 if (fields.length < 6 || fields.length > 7) {
                   return Promise.reject(new Error('Cron表达式必须包含6或7个字段（秒 分 时 日 月 周 [年]）'));
                 }
-                
+
                 // 检查每个字段是否包含有效的字符
                 // 允许的字符：*, ?, 数字, -, /, ,, L, W, #, C
                 const fieldPattern = /^[\*\?0-9\-\/\,\#LW]+$/;
-                
+
                 for (let i = 0; i < fields.length; i++) {
                   const field = fields[i];
                   if (!fieldPattern.test(field)) {
                     return Promise.reject(new Error(`字段${i + 1}包含无效字符，允许的字符：*, ?, 数字, -, /, ,, L, W, #, C`));
                   }
                 }
-                
+
                 // 检查日和周的互斥性（日和周不能同时指定值，必须有一个是?）
                 if (fields.length >= 6) {
                   const dayField = fields[3]; // 日字段
@@ -502,7 +502,7 @@ const JobManagePage: React.FC = () => {
                     return Promise.reject(new Error('日和周字段不能同时指定值，其中一个必须是 ? 或 *'));
                   }
                 }
-                
+
                 return Promise.resolve();
               },
             },
@@ -526,7 +526,7 @@ const JobManagePage: React.FC = () => {
           jobGroupName: currentRow?.jobGroup,
           cronExpression: currentRow?.cronExpression,
         }}
-        modalProps={{ destroyOnClose: true }}
+        modalProps={{destroyOnClose: true}}
         onFinish={async (value) => {
           const success = await handleUpdateCron(value as JobForm);
           if (success) {
@@ -564,22 +564,22 @@ const JobManagePage: React.FC = () => {
                 // 基本格式检查：6或7个字段，用空格分隔
                 const trimmed = value.trim();
                 const fields = trimmed.split(/\s+/);
-                
+
                 if (fields.length < 6 || fields.length > 7) {
                   return Promise.reject(new Error('Cron表达式必须包含6或7个字段（秒 分 时 日 月 周 [年]）'));
                 }
-                
+
                 // 检查每个字段是否包含有效的字符
                 // 允许的字符：*, ?, 数字, -, /, ,, L, W, #, C
                 const fieldPattern = /^[\*\?0-9\-\/\,\#LW]+$/;
-                
+
                 for (let i = 0; i < fields.length; i++) {
                   const field = fields[i];
                   if (!fieldPattern.test(field)) {
                     return Promise.reject(new Error(`字段${i + 1}包含无效字符，允许的字符：*, ?, 数字, -, /, ,, L, W, #, C`));
                   }
                 }
-                
+
                 // 检查日和周的互斥性（日和周不能同时指定值，必须有一个是?）
                 if (fields.length >= 6) {
                   const dayField = fields[3]; // 日字段
@@ -588,7 +588,7 @@ const JobManagePage: React.FC = () => {
                     return Promise.reject(new Error('日和周字段不能同时指定值，其中一个必须是 ? 或 *'));
                   }
                 }
-                
+
                 return Promise.resolve();
               },
             },
@@ -657,16 +657,16 @@ const JobManagePage: React.FC = () => {
                 dataIndex: 'triggerState',
                 render: (text) => {
                   const stateMap: Record<string, { text: string; color: string }> = {
-                    WAITING: { text: '等待中', color: 'default' },
-                    ACQUIRED: { text: '已获取', color: 'processing' },
-                    EXECUTING: { text: '执行中', color: 'processing' },
-                    COMPLETE: { text: '已完成', color: 'success' },
-                    BLOCKED: { text: '阻塞', color: 'error' },
-                    ERROR: { text: '错误', color: 'error' },
-                    PAUSED: { text: '已暂停', color: 'warning' },
-                    PAUSED_BLOCKED: { text: '暂停阻塞', color: 'warning' },
+                    WAITING: {text: '等待中', color: 'default'},
+                    ACQUIRED: {text: '已获取', color: 'processing'},
+                    EXECUTING: {text: '执行中', color: 'processing'},
+                    COMPLETE: {text: '已完成', color: 'success'},
+                    BLOCKED: {text: '阻塞', color: 'error'},
+                    ERROR: {text: '错误', color: 'error'},
+                    PAUSED: {text: '已暂停', color: 'warning'},
+                    PAUSED_BLOCKED: {text: '暂停阻塞', color: 'warning'},
                   };
-                  const stateInfo = stateMap[text as string] || { text: text as string, color: 'default' };
+                  const stateInfo = stateMap[text as string] || {text: text as string, color: 'default'};
                   return <Tag color={stateInfo.color}>{stateInfo.text}</Tag>;
                 },
               },
