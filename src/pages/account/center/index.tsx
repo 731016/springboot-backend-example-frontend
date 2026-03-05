@@ -182,7 +182,7 @@ const Center: React.FC = () => {
   return (
     <GridContent>
       <Row gutter={24}>
-        <Col lg={7} md={24}>
+        <Col lg={24} md={24}>
           <Card
             bordered={false}
             style={{

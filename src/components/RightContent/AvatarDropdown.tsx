@@ -99,12 +99,8 @@ export const AvatarDropdown: React.FC<GlobalHeaderRightProps> = ({
 
   const { currentUser } = initialState;
 
-  if (!currentUser || !currentUser.userName) {
-    return loading;
-  }
-
   const menuItems = [
-    ...(menu
+    ...(menu && currentUser && currentUser.userName
       ? [
           {
             key: 'center',
@@ -136,7 +132,23 @@ export const AvatarDropdown: React.FC<GlobalHeaderRightProps> = ({
         items: menuItems,
       }}
     >
-      {children}
+      <span className={styles.action}>
+        {currentUser?.userAvatar ? (
+          <img 
+            src={currentUser.userAvatar} 
+            alt="avatar" 
+            style={{ 
+              width: 24, 
+              height: 24, 
+              borderRadius: '50%', 
+              marginRight: 8 
+            }} 
+          />
+        ) : (
+          <UserOutlined style={{ marginRight: 8, fontSize: 20 }} />
+        )}
+        {currentUser?.userName}
+      </span>
     </HeaderDropdown>
   );
 };

@@ -5,6 +5,8 @@ const useStyles = createStyles(({ token }) => {
     main: {
       display: 'flex',
       width: '100%',
+      maxWidth: '1200px',
+      margin: '0 auto',
       height: '100%',
       paddingTop: '16px',
       paddingBottom: '16px',
@@ -15,6 +17,7 @@ const useStyles = createStyles(({ token }) => {
       '.ant-list-item': { paddingTop: '14px', paddingBottom: '14px' },
       [`@media screen and (max-width: ${token.screenMD}px)`]: {
         flexDirection: 'column',
+        maxWidth: '100%',
       },
     },
     leftMenu: {
