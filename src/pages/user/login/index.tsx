@@ -15,6 +15,7 @@ import {
 import {
   FormattedMessage,
   Helmet,
+  Link,
   SelectLang,
   useIntl,
   useModel,
@@ -27,7 +28,6 @@ import {Footer} from '@/components';
 import {login} from '@/services/ant-design-pro/api';
 import {getFakeCaptcha} from '@/services/ant-design-pro/login';
 import Settings from '../../../../config/defaultSettings';
-import {Link} from "@/.umi-production/exports";
 
 const useStyles = createStyles(({token}) => {
   return {
