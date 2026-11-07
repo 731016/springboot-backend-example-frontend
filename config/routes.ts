@@ -350,6 +350,11 @@ export default [
         component: './msgQueue/kafka-point-manage',
       },
       {
+        path: '/msgQueue/collector-source',
+        name: 'collector-source',
+        component: './msgQueue/collector-source',
+      },
+      {
         path: '/msgQueue/kafka-admin',
         name: 'kafka-admin',
         component: './msgQueue/kafka-admin',

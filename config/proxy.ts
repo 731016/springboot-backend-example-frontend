@@ -12,6 +12,13 @@
 export default {
   // 如果需要自定义本地开发服务器  请取消注释按需调整
   dev: {
+    '/api/notification': {
+      // 实时推送 WebSocket（SockJS + STOMP），由 Kafka 应用提供
+      target: 'http://localhost:8107/',
+      changeOrigin: true,           // 必须
+      ws: true,                     // 必须：开启 WebSocket 代理
+      pathRewrite: {'^/api/notification': '/api/notification'},
+    },
     '/api/ai': {
       // 要代理的地址
       target: 'http://localhost:8108/',

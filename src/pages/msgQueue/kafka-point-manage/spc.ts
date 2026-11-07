@@ -67,23 +67,59 @@ export const DEFAULT_SPC_RULE_KEYS: string[] = SPC_RULE_DEFS.map(
 /** 违反判异规则的点统一标红 */
 const VIOLATION_COLOR = '#f5222d';
 
-/** 解析点位配置的规则 JSON；空值/非法值回退为全部规则 */
-export function parseSpcRuleKeys(config?: string): string[] {
-  if (!config) return DEFAULT_SPC_RULE_KEYS;
+/** 判异规则可覆盖的参数（未配置时使用 SPC_RULE_DEFS 默认值） */
+export type SPCRuleParams = Record<
+  string,
+  { param1?: number; param2?: number }
+>;
+
+export interface SPCRuleConfig {
+  keys: string[];
+  params: SPCRuleParams;
+}
+
+/** 解析点位配置的规则 JSON，支持 ["R1"] 与 [{ key, param1, param2 }] 两种格式 */
+export function parseSpcRuleConfig(config?: string): SPCRuleConfig {
+  const fallback: SPCRuleConfig = { keys: DEFAULT_SPC_RULE_KEYS, params: {} };
+  if (!config) return fallback;
   try {
     const parsed = JSON.parse(config);
-    if (Array.isArray(parsed)) {
-      const keys = parsed.filter(
-        (key) =>
-          typeof key === 'string' &&
-          SPC_RULE_DEFS.some((def) => def.key === key),
-      );
-      return keys.length > 0 ? keys : DEFAULT_SPC_RULE_KEYS;
-    }
+    if (!Array.isArray(parsed)) return fallback;
+    const keys: string[] = [];
+    const params: SPCRuleParams = {};
+    parsed.forEach((item) => {
+      const key = typeof item === 'string' ? item : item?.key;
+      if (
+        typeof key !== 'string' ||
+        !SPC_RULE_DEFS.some((def) => def.key === key)
+      ) {
+        return;
+      }
+      keys.push(key);
+      if (item && typeof item === 'object') {
+        const param1 = Number(item.param1);
+        const param2 = Number(item.param2);
+        const current = params[key] ?? {};
+        if (Number.isFinite(param1) && param1 > 0) {
+          current.param1 = param1;
+        }
+        if (Number.isFinite(param2) && param2 > 0) {
+          current.param2 = param2;
+        }
+        if (current.param1 !== undefined || current.param2 !== undefined) {
+          params[key] = current;
+        }
+      }
+    });
+    return keys.length > 0 ? { keys, params } : fallback;
   } catch (_e) {
-    return DEFAULT_SPC_RULE_KEYS;
+    return fallback;
   }
-  return DEFAULT_SPC_RULE_KEYS;
+}
+
+/** 解析点位配置的规则 JSON；空值/非法值回退为全部规则 */
+export function parseSpcRuleKeys(config?: string): string[] {
+  return parseSpcRuleConfig(config).keys;
 }
 
 export interface SPCInput {
@@ -91,6 +127,8 @@ export interface SPCInput {
   times: number[];
   groupSize: number;
   ruleKeys: string[];
+  /** 判异规则参数覆盖值 */
+  ruleParams?: SPCRuleParams;
   usl?: number;
   lsl?: number;
 }
@@ -128,6 +166,8 @@ export interface SPCResult {
   groups: SPCGroup[];
   seriesList: SPCChartSeries[];
   rainbow?: { bins: string[]; counts: number[]; normal: number[] };
+  /** 点位配置的规格限，仅用于展示与能力分析，不作为控制限参与判异 */
+  spec?: { usl?: number; lsl?: number };
   capability?: {
     cp?: number;
     cpk?: number;
@@ -327,6 +367,7 @@ function evaluateRules(
   values: number[],
   line: SPCLine,
   ruleKeys: string[],
+  ruleParams?: SPCRuleParams,
 ): Array<{ labels: string[]; color?: string }> {
   const sigma = (line.ucl - line.lcl) / 6;
   const zonesValid = sigma > 0 && Number.isFinite(sigma);
@@ -334,12 +375,15 @@ function evaluateRules(
   const zone1Lower = line.cl - sigma;
   const zone2Upper = line.cl + 2 * sigma;
   const zone2Lower = line.cl - 2 * sigma;
+  const defs = SPC_RULE_DEFS.filter((def) => ruleKeys.includes(def.key));
 
   return values.map((value, index) => {
     const labels: string[] = [];
-    const defs = SPC_RULE_DEFS.filter((def) => ruleKeys.includes(def.key));
 
     for (const def of defs) {
+      // 点位可覆盖规则参数，未配置时使用默认值
+      const param1 = ruleParams?.[def.key]?.param1 ?? def.param1;
+      const param2 = ruleParams?.[def.key]?.param2 ?? def.param2;
       if (def.key === 'R1') {
         if (value > line.ucl || value < line.lcl) labels.push(def.label);
         continue;
@@ -352,13 +396,13 @@ function evaluateRules(
       };
 
       if (def.key === 'R2') {
-        const data = window(def.param1 ?? 9);
+        const data = window(param1 ?? 9);
         if (!data) continue;
         const upper = data.every((item) => item > line.cl);
         const lower = data.every((item) => item < line.cl);
         if (upper || lower) labels.push(def.label);
       } else if (def.key === 'R3') {
-        const data = window(def.param1 ?? 6);
+        const data = window(param1 ?? 6);
         if (!data) continue;
         let rising = true;
         let falling = true;
@@ -368,7 +412,7 @@ function evaluateRules(
         }
         if (rising || falling) labels.push(def.label);
       } else if (def.key === 'R4') {
-        const data = window(def.param1 ?? 14);
+        const data = window(param1 ?? 14);
         if (!data) continue;
         let alternation = 0;
         let direction = 0;
@@ -384,32 +428,29 @@ function evaluateRules(
         }
         if (alternation === data.length - 1) labels.push(def.label);
       } else if (def.key === 'R5') {
-        const data = window(def.param1 ?? 3);
-        const need = def.param2 ?? 2;
+        const data = window(param1 ?? 3);
+        const need = param2 ?? 2;
         if (!data) continue;
         const upper = data.filter((item) => item > zone2Upper).length;
         const lower = data.filter((item) => item < zone2Lower).length;
         if (upper >= need || lower >= need) labels.push(def.label);
       } else if (def.key === 'R6') {
-        const data = window(def.param1 ?? 5);
-        const need = def.param2 ?? 4;
+        const data = window(param1 ?? 5);
+        const need = param2 ?? 4;
         if (!data) continue;
         const upper = data.filter((item) => item > zone1Upper).length;
         const lower = data.filter((item) => item < zone1Lower).length;
         if (upper >= need || lower >= need) labels.push(def.label);
       } else if (def.key === 'R7') {
-        const data = window(def.param1 ?? 15);
+        const data = window(param1 ?? 15);
         if (!data) continue;
-        const upper = data.filter(
-          (item) => item > line.cl && item < zone1Upper,
+        // Nelson R7：连续 N 点落在中心线两侧 ±1σ 内即可，不要求两侧都出现
+        const inside = data.filter(
+          (item) => item > zone1Lower && item < zone1Upper,
         ).length;
-        const lower = data.filter(
-          (item) => item < line.cl && item > zone1Lower,
-        ).length;
-        if (upper + lower === data.length && upper > 0 && lower > 0)
-          labels.push(def.label);
+        if (inside === data.length) labels.push(def.label);
       } else if (def.key === 'R8') {
-        const data = window(def.param1 ?? 8);
+        const data = window(param1 ?? 8);
         if (!data) continue;
         const upper = data.filter((item) => item > zone1Upper).length;
         const lower = data.filter((item) => item < zone1Lower).length;
@@ -428,8 +469,9 @@ function buildSeries(
   line: SPCLine,
   ruleKeys: string[],
   offset = 0,
+  ruleParams?: SPCRuleParams,
 ): SPCChartSeries {
-  const results = evaluateRules(values, line, ruleKeys);
+  const results = evaluateRules(values, line, ruleKeys, ruleParams);
   return {
     name,
     line,
@@ -445,7 +487,7 @@ function buildSeries(
 // ---------- 主入口 ----------
 
 export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
-  const { values, times, ruleKeys } = input;
+  const { values, times, ruleKeys, ruleParams } = input;
   const usl = input.usl ?? undefined;
   const lsl = input.lsl ?? undefined;
   const empty: SPCResult = {
@@ -542,6 +584,8 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
   let rainbow: SPCResult['rainbow'];
   let capability: SPCResult['capability'];
 
+  // 控制限始终由采集数据计算；点位配置的上下限作为规格限单独展示，
+  // 避免把规格限当作控制限参与判异（否则 R2~R8 的统计含义会被破坏）
   if (type === 'FRACTION_DEFECTIVE_PARTS_CHART') {
     if (usl === undefined && lsl === undefined) {
       warnings.push('点位未配置上下限，无法统计不良率');
@@ -576,7 +620,25 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
       ucl: roundTo(Math.min(1, pBar + 3 * sigmaP), 4),
       lcl: roundTo(Math.max(0, pBar - 3 * sigmaP), 4),
     };
-    seriesList = [buildSeries('不合格率', pValues, line, ['R1'])];
+    // pBar 为 0 或 1 时 sigmaP 为 0，此时无法构造控制限，只展示点不做判异
+    const noVariation = pBar <= 0 || pBar >= 1;
+    if (noVariation) {
+      warnings.push(
+        pBar <= 0
+          ? '本时段无不合格品，p 图控制限不可用，暂不判异'
+          : '本时段全部为不合格品，p 图控制限不可用，暂不判异',
+      );
+    }
+    seriesList = [
+      buildSeries(
+        '不合格率',
+        pValues,
+        line,
+        noVariation ? [] : ['R1'],
+        0,
+        ruleParams,
+      ),
+    ];
   } else if (type === 'INDIVIDUAL_RANGE_CHART') {
     const mrValues = movingRanges(values);
     const mrMean = mean(mrValues);
@@ -592,8 +654,8 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
       lcl: roundTo(Math.max(0, mrMean - 3 * d3(2) * sigma), 3),
     };
     seriesList = [
-      buildSeries('单值', values, individualLine, ruleKeys),
-      buildSeries('移动极差', mrValues, mrLine, ruleKeys, 1),
+      buildSeries('样本值', values, individualLine, ruleKeys, 0, ruleParams),
+      buildSeries('样本极差', mrValues, mrLine, ruleKeys, 1, ruleParams),
     ];
     capability = capabilityOf(sigma);
   } else if (type === 'I_MR_R/S') {
@@ -632,13 +694,15 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
             ),
           };
     seriesList = [
-      buildSeries('子组均值', allMeans, meanLine, ruleKeys),
-      buildSeries('均值的移动极差', mrMeans, mrLine, ruleKeys, 1),
+      buildSeries('子组均值', allMeans, meanLine, ruleKeys, 0, ruleParams),
+      buildSeries('均值的移动极差', mrMeans, mrLine, ruleKeys, 1, ruleParams),
       buildSeries(
         groupSize < 9 ? '子组极差' : '子组标准差',
         thirdValues,
         thirdLine,
         ruleKeys,
+        0,
+        ruleParams,
       ),
     ];
     capability = capabilityOf(thirdSigma);
@@ -655,8 +719,8 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
       lcl: roundTo(Math.max(0, stdevMean - 3 * sigma * c5(groupSize)), 3),
     };
     seriesList = [
-      buildSeries('子组均值', allMeans, meanLine, ruleKeys),
-      buildSeries('子组标准差', allStdevs, sLine, ruleKeys),
+      buildSeries('子组均值', allMeans, meanLine, ruleKeys, 0, ruleParams),
+      buildSeries('子组标准差', allStdevs, sLine, ruleKeys, 0, ruleParams),
     ];
     capability = capabilityOf(sigma);
   } else if (type === 'MEAN_RANGE_RAINBOW_CHART') {
@@ -666,7 +730,9 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
       ucl: roundTo(meanAll + (3 * sigma) / Math.sqrt(groupSize), 3),
       lcl: roundTo(meanAll - (3 * sigma) / Math.sqrt(groupSize), 3),
     };
-    seriesList = [buildSeries('子组均值', allMeans, meanLine, ruleKeys)];
+    seriesList = [
+      buildSeries('子组均值', allMeans, meanLine, ruleKeys, 0, ruleParams),
+    ];
     rainbow = buildRainbow(groups, sigma, meanLine);
     capability = capabilityOf(sigma);
   } else {
@@ -683,8 +749,8 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
       lcl: roundTo(Math.max(0, rangeMean - 3 * sigma * d3(groupSize)), 3),
     };
     seriesList = [
-      buildSeries('子组均值', allMeans, meanLine, ruleKeys),
-      buildSeries('子组极差', allRanges, rangeLine, ruleKeys),
+      buildSeries('子组均值', allMeans, meanLine, ruleKeys, 0, ruleParams),
+      buildSeries('子组极差', allRanges, rangeLine, ruleKeys, 0, ruleParams),
     ];
     capability = capabilityOf(sigma);
   }
@@ -701,6 +767,12 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
     groups,
     seriesList,
     rainbow,
+    spec:
+      type === 'FRACTION_DEFECTIVE_PARTS_CHART'
+        ? undefined
+        : usl !== undefined || lsl !== undefined
+          ? { usl, lsl }
+          : undefined,
     capability,
     warning: warnings.length > 0 ? warnings.join('；') : undefined,
     stats: {
@@ -712,20 +784,16 @@ export function buildSPC(type: SPCChartType, input: SPCInput): SPCResult {
   };
 }
 
-/** 彩虹图组内标准差：合并组内方差后除以 C4 */
+/** 彩虹图组内标准差：各子组标准差的均值 / C4(n)，n 为子组大小 */
 function rainbowSigma(groups: SPCGroup[]): number {
-  let varianceSum = 0;
-  let degrees = 0;
-  groups.forEach((group) => {
-    const avg = group.mean;
-    group.values.forEach((value) => {
-      varianceSum += (value - avg) ** 2;
-    });
-    degrees += group.values.length - 1;
-  });
-  if (degrees <= 0) return 0;
-  const sigmaP = Math.sqrt(varianceSum / degrees);
-  return sigmaP / c4(degrees + 1);
+  if (groups.length === 0) return 0;
+  const subgroupSize = groups[0].values.length;
+  if (subgroupSize < 2) return 0;
+  const subgroupStdevs = groups
+    .filter((group) => group.values.length === subgroupSize)
+    .map((group) => stdev(group.values));
+  if (subgroupStdevs.length === 0) return 0;
+  return mean(subgroupStdevs) / c4(subgroupSize);
 }
 
 /** 彩虹图分布直方图（bin 宽度 σ/2） */

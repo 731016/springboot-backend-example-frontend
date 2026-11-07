@@ -3,6 +3,7 @@ import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import {
   ModalForm,
   PageContainer,
+  ProFormDependency,
   ProFormDigit,
   ProFormSelect,
   ProFormSwitch,
@@ -12,13 +13,18 @@ import {
 import {
   Alert,
   Button,
+  DatePicker,
   Descriptions,
+  Form,
+  InputNumber,
   Modal,
   message,
   Select,
   Space,
   Table,
 } from 'antd';
+import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type {
@@ -40,10 +46,15 @@ import {
   updatePointConfig,
 } from './service';
 import type { SPCChartType } from './spc';
+import type { CollectorSource, PointBinding } from '../collector-source/data';
+import {
+  getPointBinding,
+  listAllCollectorSources,
+} from '../collector-source/service';
 import {
   buildSPC,
   DEFAULT_SPC_RULE_KEYS,
-  parseSpcRuleKeys,
+  parseSpcRuleConfig,
   SPC_CHART_LABEL,
   SPC_CHART_ORDER,
   SPC_RULE_DEFS,
@@ -57,10 +68,109 @@ const DataTypeLabel: Record<number, string> = {
   3: '超过上下限制数据',
 };
 
+const PROTOCOL_LABEL: Record<string, string> = {
+  HTTP: 'HTTP',
+  MODBUS_TCP: 'Modbus TCP',
+  OPC_UA: 'OPC UA',
+};
+
+/** 触发浏览器下载 */
+const downloadFile = (
+  content: string | Blob,
+  filename: string,
+  mime = 'text/plain;charset=utf-8;',
+) => {
+  const blob =
+    content instanceof Blob ? content : new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+/** 导出 ECharts 图表为图片（SVG 渲染器会导出 svg，Canvas 渲染器导出 png） */
+const exportChartImage = (instance: any, filename: string) => {
+  const url: string | undefined = instance?.getDataURL?.({
+    pixelRatio: 2,
+    backgroundColor: '#fff',
+  });
+  if (!url) {
+    message.warning('图表尚未渲染完成，无法导出');
+    return;
+  }
+  const ext = url.startsWith('data:image/svg') ? 'svg' : 'png';
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${filename}.${ext}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+const csvEscape = (value: unknown) => {
+  const text = value === null || value === undefined ? '' : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+/** 导出采集明细 CSV（带 BOM，避免 Excel 中文乱码） */
+const exportDetailsCsv = (rows: DataDetail[], filename: string) => {
+  const header = ['点位编码', '采集时间', '采集值', '属性', '数据类型'];
+  const lines = rows.map((row) =>
+    [
+      csvEscape(row.pointCode),
+      csvEscape(row.collectTime),
+      csvEscape(row.value),
+      csvEscape(row.attributeName),
+      csvEscape(
+        row.dataType != null
+          ? DataTypeLabel[row.dataType] ?? row.dataType
+          : '',
+      ),
+    ].join(','),
+  );
+  downloadFile(
+    `\uFEFF${[header.join(','), ...lines].join('\r\n')}`,
+    filename,
+    'text/csv;charset=utf-8;',
+  );
+};
+
+const protocolLabel = (protocol?: string) =>
+  protocol ? PROTOCOL_LABEL[protocol] || protocol : '-';
+
+const MODBUS_REGISTER_OPTIONS = [
+  { label: '线圈 (COIL)', value: 'COIL' },
+  { label: '离散输入 (DISCRETE_INPUT)', value: 'DISCRETE_INPUT' },
+  { label: '保持寄存器 (HOLDING_REGISTER)', value: 'HOLDING_REGISTER' },
+  { label: '输入寄存器 (INPUT_REGISTER)', value: 'INPUT_REGISTER' },
+];
+
+const MODBUS_DATA_TYPE_OPTIONS = [
+  'BOOLEAN',
+  'INT16',
+  'UINT16',
+  'INT32',
+  'UINT32',
+  'FLOAT32',
+];
+
 const KafkaPointManagePage: React.FC = () => {
   const actionRef = useRef<ActionType>(null);
+  // 图表实例引用，用于导出图片
+  const spcChartRef = useRef<any>(null);
+  const realtimeSpcChartRef = useRef<any>(null);
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
   const [editingPoint, setEditingPoint] = useState<PointConfig | undefined>();
+  const [editingBinding, setEditingBinding] = useState<
+    PointBinding | undefined
+  >();
+  const [collectorSources, setCollectorSources] = useState<CollectorSource[]>(
+    [],
+  );
   const [statusModalVisible, setStatusModalVisible] = useState<boolean>(false);
   const [dataDetailsModalVisible, setDataDetailsModalVisible] =
     useState<boolean>(false);
@@ -97,18 +207,45 @@ const KafkaPointManagePage: React.FC = () => {
   >();
   const [spcChartType, setSpcChartType] =
     useState<SPCChartType>('MEAN_RANGE_CHART');
-
-  // 当前点位启用的 SPC 判异规则
-  const spcRules = useMemo(
-    () => parseSpcRuleKeys(currentPointConfig?.spcRuleConfig),
-    [currentPointConfig],
+  // SPC 重算时段：spcRange 为选择器当前值，spcCalcRange 为点击“重算 SPC”后实际生效的时段
+  const [spcRange, setSpcRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [spcCalcRange, setSpcCalcRange] = useState<[number, number] | null>(
+    null,
   );
 
-  // SPC 控制图计算结果
+  useEffect(() => {
+    listAllCollectorSources()
+      .then((res) => {
+        if (res.code === 0) {
+          setCollectorSources(res.data || []);
+        }
+      })
+      .catch(() => {
+        // 数据源加载失败时不影响点位列表展示
+      });
+  }, []);
+
+  const getSource = (sourceId?: number) =>
+    collectorSources.find((item) => item.id === sourceId);
+
+  // 当前点位启用的 SPC 判异规则与参数
+  const spcRuleConfig = useMemo(
+    () => parseSpcRuleConfig(currentPointConfig?.spcRuleConfig),
+    [currentPointConfig],
+  );
+  const spcRules = spcRuleConfig.keys;
+
+  // SPC 控制图计算结果（按“重算 SPC”时确定的时段过滤）
   const spcResult = useMemo(() => {
     const valid = chartDataDetails.filter(
-      (item): item is DataDetail & { value: number; collectTime: string } =>
-        item.value != null && !!item.collectTime,
+      (item): item is DataDetail & { value: number; collectTime: string } => {
+        // 非统计数据（如班外数据）不参与 SPC 计算
+        if (item.dataType === 2) return false;
+        if (item.value == null || !item.collectTime) return false;
+        if (!spcCalcRange) return true;
+        const time = new Date(item.collectTime).getTime();
+        return time >= spcCalcRange[0] && time <= spcCalcRange[1];
+      },
     );
     return buildSPC(spcChartType, {
       values: valid.map((item) => item.value),
@@ -118,10 +255,17 @@ const KafkaPointManagePage: React.FC = () => {
           ? 1
           : (currentPointConfig?.spcGroupSize ?? 5),
       ruleKeys: spcRules,
+      ruleParams: spcRuleConfig.params,
       usl: currentPointConfig?.maxLimit,
       lsl: currentPointConfig?.minLimit,
     });
-  }, [chartDataDetails, spcChartType, currentPointConfig, spcRules]);
+  }, [
+    chartDataDetails,
+    spcChartType,
+    currentPointConfig,
+    spcRuleConfig,
+    spcCalcRange,
+  ]);
 
   // SPC 控制图 ECharts 配置
   const spcOption = useMemo(
@@ -131,9 +275,22 @@ const KafkaPointManagePage: React.FC = () => {
             spcResult,
             spcChartType,
             getSPCChartHeight(spcChartType),
+            currentPointConfig?.unit,
           )
         : null,
-    [spcResult, spcChartType],
+    [spcResult, spcChartType, currentPointConfig],
+  );
+
+  // 导出 CSV 的数据：统计时段内且排除非统计数据
+  const spcExportData = useMemo(
+    () =>
+      chartDataDetails.filter((item) => {
+        if (item.dataType === 2) return false;
+        if (!spcCalcRange || !item.collectTime) return true;
+        const time = new Date(item.collectTime).getTime();
+        return time >= spcCalcRange[0] && time <= spcCalcRange[1];
+      }),
+    [chartDataDetails, spcCalcRange],
   );
 
   const spcPrimaryLine = spcResult.seriesList[0]?.line;
@@ -143,18 +300,20 @@ const KafkaPointManagePage: React.FC = () => {
   const fmtSPC = (value?: number) =>
     value === undefined || value === null ? '-' : Number(value).toFixed(3);
 
-  // 实时点位启用的 SPC 判异规则
-  const realtimeSpcRules = useMemo(
-    () => parseSpcRuleKeys(realtimePointConfig?.spcRuleConfig),
+  // 实时点位启用的 SPC 判异规则与参数
+  const realtimeSpcRuleConfig = useMemo(
+    () => parseSpcRuleConfig(realtimePointConfig?.spcRuleConfig),
     [realtimePointConfig],
   );
+  const realtimeSpcRules = realtimeSpcRuleConfig.keys;
 
   // 实时数据 SPC 控制图计算结果（按采集时间升序）
   const realtimeSpcResult = useMemo(() => {
     const valid = realtimeData
       .filter(
         (item): item is DataDetail & { value: number; collectTime: string } =>
-          item.value != null && !!item.collectTime,
+          // 非统计数据（如班外数据）不参与 SPC 计算
+          item.dataType !== 2 && item.value != null && !!item.collectTime,
       )
       .slice()
       .sort(
@@ -169,6 +328,7 @@ const KafkaPointManagePage: React.FC = () => {
           ? 1
           : (realtimePointConfig?.spcGroupSize ?? 5),
       ruleKeys: realtimeSpcRules,
+      ruleParams: realtimeSpcRuleConfig.params,
       usl: realtimePointConfig?.maxLimit,
       lsl: realtimePointConfig?.minLimit,
     });
@@ -176,7 +336,7 @@ const KafkaPointManagePage: React.FC = () => {
     realtimeData,
     realtimeSpcChartType,
     realtimePointConfig,
-    realtimeSpcRules,
+    realtimeSpcRuleConfig,
   ]);
 
   // 实时 SPC 控制图 ECharts 配置
@@ -187,9 +347,10 @@ const KafkaPointManagePage: React.FC = () => {
             realtimeSpcResult,
             realtimeSpcChartType,
             getSPCChartHeight(realtimeSpcChartType),
+            realtimePointConfig?.unit,
           )
         : null,
-    [realtimeSpcResult, realtimeSpcChartType],
+    [realtimeSpcResult, realtimeSpcChartType, realtimePointConfig],
   );
 
   const realtimeSpcPrimaryLine = realtimeSpcResult.seriesList[0]?.line;
@@ -339,10 +500,9 @@ const KafkaPointManagePage: React.FC = () => {
         }
 
         // WebSocket 连接地址
-        // Kafka 应用运行在 8107 端口，context-path 是 /api，所以 WebSocket 端点是 /api/notification
-        // 注意：WebSocket 连接通常无法通过 HTTP 代理，需要直接连接到 Kafka 应用
-        // 如果使用代理失败，可以尝试直接使用完整地址: 'http://localhost:8107/api/notification'
-        const wsHost = 'http://localhost:8107/api/notification';
+        // 统一走同源，由 dev 代理 / OpenResty 反向代理转发到 8107，
+        // 避免打包后写死 localhost 导致浏览器去连访问者自己的电脑
+        const wsHost = `${window.location.origin}/api/notification`;
         const wsTopic = '/topic/kafka/data';
 
         console.log('WebSocket 连接配置:', { wsHost, wsTopic, pointCode });
@@ -546,6 +706,17 @@ const KafkaPointManagePage: React.FC = () => {
     };
   }, []);
 
+  // 按选择器中的时段重算 SPC（未选择时段则使用全部数据）
+  const handleRecalcSpc = () => {
+    if (spcRange) {
+      setSpcCalcRange([spcRange[0].valueOf(), spcRange[1].valueOf()]);
+      message.success('SPC 已按所选时段重算');
+    } else {
+      setSpcCalcRange(null);
+      message.success('已使用全部数据重算 SPC');
+    }
+  };
+
   const handleViewStatistics = async (record: PointConfig) => {
     if (!record.pointCode) {
       message.error('pointCode 为空');
@@ -554,6 +725,8 @@ const KafkaPointManagePage: React.FC = () => {
     setCurrentPointCode(record.pointCode);
     setCurrentPointConfig(record);
     setSpcChartType('MEAN_RANGE_CHART');
+    setSpcRange(null);
+    setSpcCalcRange(null);
     setLoadingStatistics(true);
     setLoadingChartData(true);
     try {
@@ -577,6 +750,21 @@ const KafkaPointManagePage: React.FC = () => {
           return timeA - timeB;
         });
         setChartDataDetails(sortedData);
+        // 默认带上数据的时间范围
+        const timeRange = sortedData.reduce<[number, number] | null>(
+          (range, item) => {
+            if (!item.collectTime) return range;
+            const time = new Date(item.collectTime).getTime();
+            if (Number.isNaN(time)) return range;
+            if (!range) return [time, time];
+            return [Math.min(range[0], time), Math.max(range[1], time)];
+          },
+          null,
+        );
+        if (timeRange) {
+          setSpcRange([dayjs(timeRange[0]), dayjs(timeRange[1])]);
+          setSpcCalcRange(timeRange);
+        }
         setStatisticsModalVisible(true);
       } else {
         message.error(chartDataRes.message || '获取采集数据失败');
@@ -599,16 +787,22 @@ const KafkaPointManagePage: React.FC = () => {
       dataIndex: 'pointName',
     },
     {
-      title: '校验URL',
-      dataIndex: 'validUrl',
+      title: '单位',
+      dataIndex: 'unit',
       hideInSearch: true,
-      ellipsis: true,
+      render: (_, record) => record.unit || '-',
     },
     {
-      title: '数据URL',
-      dataIndex: 'dataUrl',
+      title: '采集数据源',
+      dataIndex: 'sourceId',
       hideInSearch: true,
       ellipsis: true,
+      render: (_, record) => {
+        const source = getSource(record.sourceId);
+        return source
+          ? `${source.sourceName}（${protocolLabel(source.protocol)}）`
+          : '-';
+      },
     },
     {
       title: '最小限值',
@@ -664,7 +858,19 @@ const KafkaPointManagePage: React.FC = () => {
         <Space size="small" wrap>
           <a
             key="edit"
-            onClick={() => {
+            onClick={async () => {
+              let binding: PointBinding | undefined;
+              if (record.id) {
+                try {
+                  const res = await getPointBinding(record.id);
+                  if (res.code === 0) {
+                    binding = res.data;
+                  }
+                } catch (_e) {
+                  binding = undefined;
+                }
+              }
+              setEditingBinding(binding);
               setEditingPoint(record);
               setCreateModalVisible(true);
             }}
@@ -745,6 +951,8 @@ const KafkaPointManagePage: React.FC = () => {
               type="primary"
               key="primary"
               onClick={() => {
+                setEditingPoint(undefined);
+                setEditingBinding(undefined);
                 setCreateModalVisible(true);
               }}
             >
@@ -793,7 +1001,7 @@ const KafkaPointManagePage: React.FC = () => {
 
       <ModalForm
         title={editingPoint ? '编辑采集点' : '新增采集点'}
-        width="560px"
+        width="680px"
         open={createModalVisible}
         onOpenChange={setCreateModalVisible}
         modalProps={{ destroyOnClose: true }}
@@ -804,27 +1012,52 @@ const KafkaPointManagePage: React.FC = () => {
                 isMainPoint: editingPoint.isMainPoint === 1,
                 status: editingPoint.status === 1,
                 spcGroupSize: editingPoint.spcGroupSize ?? 5,
-                spcRuleKeys: parseSpcRuleKeys(editingPoint.spcRuleConfig),
+                spcRuleKeys: parseSpcRuleConfig(editingPoint.spcRuleConfig)
+                  .keys,
+                spcRuleParams: parseSpcRuleConfig(editingPoint.spcRuleConfig)
+                  .params,
+                binding: editingBinding ?? {},
               }
             : {
                 status: true,
                 spcGroupSize: 5,
                 spcRuleKeys: DEFAULT_SPC_RULE_KEYS,
+                spcRuleParams: {},
+                binding: {},
               }
         }
         onFinish={async (value) => {
-          // 将 Boolean 转换为 Integer (0/1)，并把判异规则多选序列化为 JSON
+          // 将 Boolean 转换为 Integer (0/1)，并把判异规则及其参数序列化为 JSON
+          const ruleParams = value.spcRuleParams ?? {};
+          const ruleConfigJson = JSON.stringify(
+            (value.spcRuleKeys ?? DEFAULT_SPC_RULE_KEYS).map(
+              (key: string) => {
+                const def = SPC_RULE_DEFS.find((rule) => rule.key === key);
+                const param1 = ruleParams[key]?.param1 ?? def?.param1;
+                const param2 = ruleParams[key]?.param2 ?? def?.param2;
+                const item: { key: string; param1?: number; param2?: number } =
+                  { key };
+                if (param1 !== undefined) item.param1 = param1;
+                if (param2 !== undefined) item.param2 = param2;
+                return item;
+              },
+            ),
+          );
           const submitData: any = {
             ...editingPoint,
             ...value,
             isMainPoint: value.isMainPoint ? 1 : 0,
             status: value.status ? 1 : 0,
             spcGroupSize: value.spcGroupSize ?? 5,
-            spcRuleConfig: JSON.stringify(
-              value.spcRuleKeys ?? DEFAULT_SPC_RULE_KEYS,
-            ),
+            spcRuleConfig: ruleConfigJson,
           };
           delete submitData.spcRuleKeys;
+          delete submitData.spcRuleParams;
+          // HTTP 协议由数据源统一配置，不需要点位绑定；Modbus/OPC UA 保留绑定字段
+          const protocol = getSource(value.sourceId)?.protocol;
+          if (protocol !== 'MODBUS_TCP' && protocol !== 'OPC_UA') {
+            delete submitData.binding;
+          }
 
           let success = false;
           if (editingPoint && editingPoint.id) {
@@ -865,12 +1098,112 @@ const KafkaPointManagePage: React.FC = () => {
           label="采集点名称"
           rules={[{ required: true, message: '请输入采集点名称' }]}
         />
-        <ProFormText name="validUrl" label="校验URL" />
         <ProFormText
-          name="dataUrl"
-          label="数据URL"
-          rules={[{ required: true, message: '请输入数据URL' }]}
+          name="unit"
+          label="单位"
+          placeholder="例如 ℃、MPa、mm，可不填"
         />
+        <ProFormSelect
+          name="sourceId"
+          label="采集数据源"
+          showSearch
+          options={collectorSources.map((item) => ({
+            label: `${item.sourceName}（${protocolLabel(item.protocol)}）`,
+            value: item.id,
+          }))}
+          rules={[{ required: true, message: '请选择采集数据源' }]}
+        />
+        <ProFormDependency name={['sourceId']}>
+          {({ sourceId }) => {
+            const protocol = getSource(sourceId)?.protocol;
+            if (protocol === 'MODBUS_TCP') {
+              return (
+                <>
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message="Modbus TCP 点位绑定"
+                  />
+                  <ProFormSelect
+                    name={['binding', 'registerType']}
+                    label="寄存器类型"
+                    options={MODBUS_REGISTER_OPTIONS}
+                    rules={[{ required: true, message: '请选择寄存器类型' }]}
+                  />
+                  <ProFormDigit
+                    name={['binding', 'address']}
+                    label="起始地址"
+                    fieldProps={{ min: 0, precision: 0 }}
+                    rules={[{ required: true, message: '请输入起始地址' }]}
+                  />
+                  <ProFormDigit
+                    name={['binding', 'quantity']}
+                    label="读取数量"
+                    tooltip="线圈/离散输入单位为位，寄存器单位为字；32 位数据至少 2"
+                    fieldProps={{ min: 1, precision: 0 }}
+                    initialValue={1}
+                    rules={[{ required: true, message: '请输入读取数量' }]}
+                  />
+                  <ProFormSelect
+                    name={['binding', 'dataType']}
+                    label="数据类型"
+                    options={MODBUS_DATA_TYPE_OPTIONS}
+                    initialValue="UINT16"
+                    rules={[{ required: true, message: '请选择数据类型' }]}
+                  />
+                  <ProFormSelect
+                    name={['binding', 'byteOrder']}
+                    label="字节序"
+                    options={['ABCD', 'CDAB', 'BADC', 'DCBA']}
+                    initialValue="ABCD"
+                  />
+                  <ProFormDigit
+                    name={['binding', 'scale']}
+                    label="换算系数"
+                    tooltip="采集值 = 原始值 × 换算系数"
+                    fieldProps={{ min: -99999, step: 0.001 }}
+                    initialValue={1}
+                  />
+                </>
+              );
+            }
+            if (protocol === 'OPC_UA') {
+              return (
+                <>
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message="OPC UA 点位绑定"
+                  />
+                  <ProFormText
+                    name={['binding', 'nodeId']}
+                    label="节点 NodeId"
+                    placeholder="例如 ns=2;s=Demo.Value"
+                    rules={[{ required: true, message: '请输入节点 NodeId' }]}
+                  />
+                  <ProFormText
+                    name={['binding', 'attributeName']}
+                    label="属性名称"
+                    placeholder="不填则默认使用采集点编码"
+                  />
+                </>
+              );
+            }
+            if (protocol === 'HTTP') {
+              return (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  message="HTTP 协议由数据源统一定义请求模板与响应解析，无需额外点位绑定"
+                />
+              );
+            }
+            return null;
+          }}
+        </ProFormDependency>
         <ProFormDigit
           name="minLimit"
           label="最小限值"
@@ -904,6 +1237,64 @@ const KafkaPointManagePage: React.FC = () => {
           fieldProps={{ mode: 'multiple' }}
           rules={[{ required: true, message: '请至少启用一条判异规则' }]}
         />
+        <ProFormDependency name={['spcRuleKeys']}>
+          {({ spcRuleKeys }) => {
+            const rules = SPC_RULE_DEFS.filter(
+              (rule) =>
+                (spcRuleKeys ?? []).includes(rule.key) &&
+                (rule.param1 !== undefined || rule.param2 !== undefined),
+            );
+            if (rules.length === 0) return null;
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 8, color: '#666' }}>
+                  判异规则参数
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                  {rules.map((rule) => (
+                    <div
+                      key={rule.key}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      {rule.param1 !== undefined && (
+                        <>
+                          <span>{`${rule.key} 参数1`}</span>
+                          <Form.Item
+                            name={['spcRuleParams', rule.key, 'param1']}
+                            noStyle
+                            initialValue={rule.param1}
+                          >
+                            <InputNumber
+                              min={1}
+                              precision={0}
+                              style={{ width: 72 }}
+                            />
+                          </Form.Item>
+                        </>
+                      )}
+                      {rule.param2 !== undefined && (
+                        <>
+                          <span>{`${rule.key} 参数2`}</span>
+                          <Form.Item
+                            name={['spcRuleParams', rule.key, 'param2']}
+                            noStyle
+                            initialValue={rule.param2}
+                          >
+                            <InputNumber
+                              min={1}
+                              precision={0}
+                              style={{ width: 72 }}
+                            />
+                          </Form.Item>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          }}
+        </ProFormDependency>
         <ProFormSwitch name="isMainPoint" label="是否主点" />
         <ProFormSwitch name="status" label="是否启用" initialValue={true} />
       </ModalForm>
@@ -1036,6 +1427,8 @@ const KafkaPointManagePage: React.FC = () => {
           setCurrentPointCode('');
           setCurrentPointConfig(undefined);
           setSpcChartType('MEAN_RANGE_CHART');
+          setSpcRange(null);
+          setSpcCalcRange(null);
         }}
         footer={[
           <Button
@@ -1046,6 +1439,8 @@ const KafkaPointManagePage: React.FC = () => {
               setCurrentPointCode('');
               setCurrentPointConfig(undefined);
               setSpcChartType('MEAN_RANGE_CHART');
+              setSpcRange(null);
+              setSpcCalcRange(null);
             }}
           >
             关闭
@@ -1072,7 +1467,7 @@ const KafkaPointManagePage: React.FC = () => {
                 <h3 style={{ margin: 0 }}>
                   SPC 控制图 {currentPointCode ? `（${currentPointCode}）` : ''}
                 </h3>
-                <Space size="middle">
+                <Space size="middle" wrap>
                   <span>图型：</span>
                   <Select
                     value={spcChartType}
@@ -1086,6 +1481,51 @@ const KafkaPointManagePage: React.FC = () => {
                         pChartDisabled,
                     }))}
                   />
+                  <span>统计时段：</span>
+                  <DatePicker.RangePicker
+                    showTime
+                    allowClear
+                    value={spcRange}
+                    format="YYYY-MM-DD HH:mm:ss"
+                    placeholder={['开始时间', '结束时间']}
+                    style={{ width: 380 }}
+                    onChange={(values) => {
+                      if (values && values[0] && values[1]) {
+                        setSpcRange([values[0], values[1]]);
+                      } else {
+                        setSpcRange(null);
+                      }
+                    }}
+                  />
+                  <Button type="primary" onClick={handleRecalcSpc}>
+                    重算 SPC
+                  </Button>
+                  <Button
+                    disabled={!spcOption}
+                    onClick={() =>
+                      exportChartImage(
+                        spcChartRef.current?.getEchartsInstance?.(),
+                        `${currentPointCode || 'SPC'}-SPC图-${dayjs().format(
+                          'YYYYMMDDHHmmss',
+                        )}`,
+                      )
+                    }
+                  >
+                    导出图片
+                  </Button>
+                  <Button
+                    disabled={spcExportData.length === 0}
+                    onClick={() =>
+                      exportDetailsCsv(
+                        spcExportData,
+                        `${currentPointCode || 'SPC'}-SPC数据-${dayjs().format(
+                          'YYYYMMDDHHmmss',
+                        )}.csv`,
+                      )
+                    }
+                  >
+                    导出 CSV
+                  </Button>
                 </Space>
               </div>
 
@@ -1116,6 +1556,12 @@ const KafkaPointManagePage: React.FC = () => {
                 <Descriptions.Item label="LCL">
                   {fmtSPC(spcPrimaryLine?.lcl)}
                 </Descriptions.Item>
+                <Descriptions.Item label="USL（规格上限）">
+                  {fmtSPC(spcResult.spec?.usl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="LSL（规格下限）">
+                  {fmtSPC(spcResult.spec?.lsl)}
+                </Descriptions.Item>
                 <Descriptions.Item label="超限点数">
                   {spcResult.stats.outOfSpecCount}
                 </Descriptions.Item>
@@ -1144,7 +1590,9 @@ const KafkaPointManagePage: React.FC = () => {
 
               {spcOption ? (
                 <ReactECharts
+                  ref={spcChartRef}
                   option={spcOption}
+                  notMerge
                   style={{ width: '100%', height: `${spcHeight}px` }}
                   opts={{ renderer: 'svg' }}
                 />
@@ -1205,6 +1653,25 @@ const KafkaPointManagePage: React.FC = () => {
                       dataIndex: 'averageValue',
                       key: 'averageValue',
                       render: (value: number) => value?.toFixed(2) || '-',
+                    },
+                    {
+                      title: '标准差',
+                      dataIndex: 'standardDeviation',
+                      key: 'standardDeviation',
+                      render: (value?: number) =>
+                        value == null ? '-' : value.toFixed(4),
+                    },
+                    {
+                      title: '样本数',
+                      dataIndex: 'sampleCount',
+                      key: 'sampleCount',
+                      render: (value?: number) => value ?? '-',
+                    },
+                    {
+                      title: '超限次数',
+                      dataIndex: 'outOfLimitCount',
+                      key: 'outOfLimitCount',
+                      render: (value?: number) => value ?? '-',
                     },
                     {
                       title: '状态',
@@ -1294,6 +1761,32 @@ const KafkaPointManagePage: React.FC = () => {
                         realtimePChartDisabled,
                     }))}
                   />
+                  <Button
+                    disabled={!realtimeSpcOption}
+                    onClick={() =>
+                      exportChartImage(
+                        realtimeSpcChartRef.current?.getEchartsInstance?.(),
+                        `${realtimePointCode || '实时'}-SPC图-${dayjs().format(
+                          'YYYYMMDDHHmmss',
+                        )}`,
+                      )
+                    }
+                  >
+                    导出图片
+                  </Button>
+                  <Button
+                    disabled={realtimeData.length === 0}
+                    onClick={() =>
+                      exportDetailsCsv(
+                        realtimeData,
+                        `${
+                          realtimePointCode || '实时'
+                        }-实时数据-${dayjs().format('YYYYMMDDHHmmss')}.csv`,
+                      )
+                    }
+                  >
+                    导出 CSV
+                  </Button>
                 </Space>
               </div>
 
@@ -1326,6 +1819,12 @@ const KafkaPointManagePage: React.FC = () => {
                 <Descriptions.Item label="LCL">
                   {fmtSPC(realtimeSpcPrimaryLine?.lcl)}
                 </Descriptions.Item>
+                <Descriptions.Item label="USL（规格上限）">
+                  {fmtSPC(realtimeSpcResult.spec?.usl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="LSL（规格下限）">
+                  {fmtSPC(realtimeSpcResult.spec?.lsl)}
+                </Descriptions.Item>
                 <Descriptions.Item label="超限点数">
                   {realtimeSpcResult.stats.outOfSpecCount}
                 </Descriptions.Item>
@@ -1354,7 +1853,9 @@ const KafkaPointManagePage: React.FC = () => {
 
               {realtimeSpcOption ? (
                 <ReactECharts
+                  ref={realtimeSpcChartRef}
                   option={realtimeSpcOption}
+                  notMerge
                   style={{ width: '100%', height: `${realtimeSpcHeight}px` }}
                   opts={{ renderer: 'svg' }}
                 />

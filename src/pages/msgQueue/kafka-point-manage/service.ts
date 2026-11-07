@@ -164,12 +164,14 @@ export async function queryCollectData(
  */
 export async function getDataDetailsByPointCode(
   pointCode: string,
+  limit?: number,
   options?: Record<string, any>,
 ) {
   return request<ApiResponse<DataDetail[]>>(
     `/api/kafka/dataCollect/data/detail/${pointCode}`,
     {
       method: 'GET',
+      params: limit ? { limit } : undefined,
       ...(options || {}),
     },
   );

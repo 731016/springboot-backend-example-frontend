@@ -1,12 +1,18 @@
 // SPC 控制图 ECharts option 构建（对齐 f:\spc-chart-demo 的图型布局，改写为 ECharts 6 语法）
 import type { EChartsOption } from 'echarts';
-import type { SPCChartSeries, SPCChartType, SPCResult } from './spc';
+import type {
+  SPCChartSeries,
+  SPCChartType,
+  SPCGroup,
+  SPCResult,
+} from './spc';
 
 const POINT_COLOR = '#2f9e44';
 const LINE_COLOR = '#333333';
 const UCL_COLOR = '#f5222d';
 const CL_COLOR = '#fa8c16';
 const LCL_COLOR = '#4ed2f4';
+const SPEC_COLOR = '#722ed1';
 
 const CONTROL_LINE_STYLE = { width: 1.5, type: 'dashed' as const };
 
@@ -71,6 +77,44 @@ function markLineOf(
   return { silent: true, symbol: ['none', 'none'], data };
 }
 
+/** 规格限（USL/LSL）单独绘制，仅用于展示，不参与判异 */
+function specMarkLineData(
+  spec: SPCResult['spec'],
+  line: { cl: number; ucl: number; lcl: number },
+  type: SPCChartType,
+) {
+  if (!spec) return [];
+  const entries: any[] = [];
+  const append = (
+    name: string,
+    value: number | undefined,
+    position: 'insideEndTop' | 'insideEndBottom',
+  ) => {
+    if (value === undefined || value === null) return;
+    // 与控制线重合时避免重复绘制
+    if (
+      Math.abs(value - line.ucl) < 1e-9 ||
+      Math.abs(value - line.lcl) < 1e-9
+    ) {
+      return;
+    }
+    entries.push({
+      name: `${name}=${formatValue(value, type)}`,
+      yAxis: value,
+      lineStyle: { width: 1.2, type: 'solid' as const, color: SPEC_COLOR },
+      label: {
+        position,
+        formatter: '{b}',
+        fontSize: 10,
+        color: SPEC_COLOR,
+      },
+    });
+  };
+  append('USL', spec.usl, 'insideEndTop');
+  append('LSL', spec.lsl, 'insideEndBottom');
+  return entries;
+}
+
 function seriesData(series: SPCChartSeries) {
   const padding = new Array(series.offset).fill(null);
   return [
@@ -85,7 +129,37 @@ function seriesData(series: SPCChartSeries) {
   ];
 }
 
-function baseTooltip(type: SPCChartType) {
+/** 子组明细文案：展示该子组的原始样本与统计量 */
+function subgroupDetail(group: SPCGroup, type: SPCChartType): string {
+  const n = group.values.length;
+  if (type === 'FRACTION_DEFECTIVE_PARTS_CHART') {
+    const p = group.p ?? 0;
+    return `<div style="color:#666;font-size:12px">子组明细：n=${n}，不合格率=${(
+      p * 100
+    ).toFixed(2)}%（不合格 ${Math.round(p * n)} 个）</div>`;
+  }
+  if (type === 'INDIVIDUAL_RANGE_CHART') {
+    return `<div style="color:#666;font-size:12px">子组明细：n=1，样本值=${formatValue(
+      group.values[0],
+      type,
+    )}</div>`;
+  }
+  const samples = group.values
+    .map((value) => formatValue(value, type))
+    .join(', ');
+  return (
+    `<div style="color:#666;font-size:12px">子组明细（n=${n}）：${samples}</div>` +
+    `<div style="color:#666;font-size:12px">子组均值=${formatValue(
+      group.mean,
+      type,
+    )}，极差=${formatValue(group.range, type)}，标准差=${formatValue(
+      group.stdev,
+      type,
+    )}</div>`
+  );
+}
+
+function baseTooltip(type: SPCChartType, groups?: SPCGroup[]) {
   return {
     trigger: 'axis' as const,
     axisPointer: { type: 'line' as const, link: [{ xAxisIndex: 'all' }] },
@@ -109,7 +183,14 @@ function baseTooltip(type: SPCChartType) {
             type,
           )}${ruleText}</div>`;
         });
-      return `<div style="font-weight:600;margin-bottom:4px">${title}</div>${rows.join('')}`;
+      // 子组明细只跟随主值子图（seriesIndex 0）展示
+      const main = list.find((param: any) => param.seriesIndex === 0);
+      const group =
+        main && groups && main.dataIndex >= 0
+          ? groups[main.dataIndex]
+          : undefined;
+      const detail = group ? subgroupDetail(group, type) : '';
+      return `<div style="font-weight:600;margin-bottom:4px">${title}</div>${rows.join('')}${detail}`;
     },
   };
 }
@@ -136,12 +217,44 @@ function baseAxis(xLabels: string[], gridIndex: number, type: SPCChartType) {
   };
 }
 
-function valueAxis(gridIndex: number, min?: number) {
+/** 主值子图纵轴范围需覆盖控制线与规格限，避免线条被裁掉 */
+function mainAxisRange(result: SPCResult) {
+  const main = result.seriesList[0];
+  if (!main) return undefined;
+  const values = main.points.map((point) => point.y);
+  const low = Math.min(
+    main.line.lcl,
+    result.spec?.lsl ?? main.line.lcl,
+    ...values,
+  );
+  const high = Math.max(
+    main.line.ucl,
+    result.spec?.usl ?? main.line.ucl,
+    ...values,
+  );
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return undefined;
+  const pad = (high - low) * 0.04 || Math.abs(high) * 0.01 || 1;
+  return { min: low - pad, max: high + pad };
+}
+
+function valueAxis(
+  gridIndex: number,
+  name?: string,
+  min?: number,
+  max?: number,
+  unit?: string,
+) {
   return {
     type: 'value' as const,
     gridIndex,
     scale: true,
     min,
+    max,
+    // 左侧纵轴标题：子组均值、样本值、子组极差、样本极差等；有单位时补充到标题中
+    name: name ? (unit ? `${name}（${unit}）` : name) : undefined,
+    nameLocation: 'middle' as const,
+    nameGap: 46,
+    nameTextStyle: { fontSize: 11, color: '#666' },
     axisLabel: { fontSize: 10, color: '#666' },
     splitLine: {
       show: true,
@@ -165,9 +278,13 @@ export function buildSPCOption(
   result: SPCResult,
   type: SPCChartType,
   height: number,
+  unit?: string,
 ): EChartsOption {
   const xLabels = result.xLabels;
   const isRainbow = type === 'MEAN_RANGE_RAINBOW_CHART';
+  // p 图主值为不合格率（无量纲），不拼接点位单位
+  const axisUnit =
+    type === 'FRACTION_DEFECTIVE_PARTS_CHART' ? undefined : unit;
   const grids = isRainbow
     ? [
         { left: 62, right: '26%', top: 12, bottom: 60, containLabel: true },
@@ -188,9 +305,20 @@ export function buildSPCOption(
       itemStyle: { color: POINT_COLOR },
       connectNulls: false,
       data: seriesData(item),
-      markLine: isRainbowMain
-        ? rainbowMarkLines(item.line, type)
-        : markLineOf(item.line, type),
+      markLine: (() => {
+        const base = isRainbowMain
+          ? rainbowMarkLines(item.line, type)
+          : markLineOf(item.line, type);
+        // 规格限只绘制在主值子图（第一张图）上
+        if (index !== 0) return base;
+        return {
+          ...base,
+          data: [
+            ...base.data,
+            ...specMarkLineData(result.spec, item.line, type),
+          ],
+        };
+      })(),
       ...(isRainbowMain ? { markArea: rainbowAreas(item.line) } : {}),
     };
   });
@@ -202,8 +330,12 @@ export function buildSPCOption(
       type: 'bar',
       xAxisIndex: 1,
       yAxisIndex: 1,
-      barWidth: '70%',
-      itemStyle: { color: 'rgba(47,158,68,0.35)' },
+      barWidth: '100%',
+      itemStyle: {
+        color: 'rgba(47,158,68,0.35)',
+        borderColor: '#2f9e44',
+        borderWidth: 1,
+      },
       data: result.rainbow.counts,
     });
     series.push({
@@ -211,7 +343,10 @@ export function buildSPCOption(
       type: 'line',
       xAxisIndex: 1,
       yAxisIndex: 1,
-      symbol: 'none',
+      symbol: 'circle',
+      symbolSize: 3,
+      showSymbol: true,
+      itemStyle: { color: '#fa8c16' },
       lineStyle: { width: 1.5, color: '#fa8c16' },
       data: result.rainbow.normal,
     });
@@ -224,27 +359,58 @@ export function buildSPCOption(
           type: 'value',
           gridIndex: 1,
           axisLabel: { fontSize: 9, color: '#999' },
+          axisTick: { show: true },
           splitLine: { show: false },
-          axisLine: { lineStyle: { color: '#d9d9d9' } },
+          axisLine: { show: true, lineStyle: { color: '#bfbfbf' } },
         },
       ]
     : result.seriesList.map((_, index) => baseAxis(xLabels, index, type));
 
+  // 彩虹图纵轴需覆盖 UCL/LCL 全部分区，避免 A/B/C 区被裁掉
+  const rainbowAxisRange = (() => {
+    const main = result.seriesList[0];
+    if (!main) return undefined;
+    const low = main.points.reduce(
+      (min, point) => Math.min(min, point.y),
+      Math.min(main.line.lcl, result.spec?.lsl ?? main.line.lcl),
+    );
+    const high = main.points.reduce(
+      (max, point) => Math.max(max, point.y),
+      Math.max(main.line.ucl, result.spec?.usl ?? main.line.ucl),
+    );
+    const pad = (high - low) * 0.04 || 1;
+    return { min: low - pad, max: high + pad };
+  })();
+
   const yAxis: any[] = isRainbow
     ? [
-        valueAxis(0),
+        valueAxis(
+          0,
+          result.seriesList[0]?.name,
+          rainbowAxisRange?.min,
+          rainbowAxisRange?.max,
+          axisUnit,
+        ),
         {
           type: 'category',
           gridIndex: 1,
           data: result.rainbow?.bins ?? [],
-          inverse: true,
           axisLabel: { fontSize: 9, color: '#999' },
-          axisTick: { show: false },
-          axisLine: { show: false },
+          axisTick: { show: true },
+          axisLine: { show: true, lineStyle: { color: '#bfbfbf' } },
           splitLine: { show: false },
         },
       ]
-    : result.seriesList.map((_, index) => valueAxis(index));
+    : result.seriesList.map((item, index) => {
+        const range = index === 0 ? mainAxisRange(result) : undefined;
+        return valueAxis(
+          index,
+          item.name,
+          range?.min,
+          range?.max,
+          index === 0 ? axisUnit : undefined,
+        );
+      });
 
   const zoomAxisIndex = isRainbow
     ? [0]
@@ -252,7 +418,7 @@ export function buildSPCOption(
 
   return {
     animation: false,
-    tooltip: baseTooltip(type),
+    tooltip: baseTooltip(type, result.groups),
     grid: grids,
     xAxis,
     yAxis,
@@ -323,25 +489,55 @@ function rainbowMarkLines(
 function rainbowAreas(line: { cl: number; ucl: number; lcl: number }) {
   const sigma = (line.ucl - line.lcl) / 6;
   const zones = [
-    { from: line.cl + 2 * sigma, to: line.ucl, color: 'rgba(245,34,45,0.06)' },
-    { from: line.lcl, to: line.cl - 2 * sigma, color: 'rgba(245,34,45,0.06)' },
+    {
+      from: line.cl + 2 * sigma,
+      to: line.ucl,
+      name: 'A区',
+      color: 'rgba(245,34,45,0.22)',
+    },
+    {
+      from: line.lcl,
+      to: line.cl - 2 * sigma,
+      name: 'A区',
+      color: 'rgba(245,34,45,0.22)',
+    },
     {
       from: line.cl + sigma,
       to: line.cl + 2 * sigma,
-      color: 'rgba(250,140,22,0.06)',
+      name: 'B区',
+      color: 'rgba(250,173,20,0.26)',
     },
     {
       from: line.cl - 2 * sigma,
       to: line.cl - sigma,
-      color: 'rgba(250,140,22,0.06)',
+      name: 'B区',
+      color: 'rgba(250,173,20,0.26)',
     },
-    { from: line.cl, to: line.cl + sigma, color: 'rgba(82,196,26,0.06)' },
-    { from: line.cl - sigma, to: line.cl, color: 'rgba(82,196,26,0.06)' },
+    {
+      from: line.cl,
+      to: line.cl + sigma,
+      name: 'C区',
+      color: 'rgba(82,196,26,0.22)',
+    },
+    {
+      from: line.cl - sigma,
+      to: line.cl,
+      name: 'C区',
+      color: 'rgba(82,196,26,0.22)',
+    },
   ];
   return {
     silent: true,
+    label: {
+      show: true,
+      position: 'insideLeft',
+      distance: 10,
+      color: '#595959',
+      fontSize: 11,
+      fontWeight: 'bold',
+    },
     data: zones.map((zone) => [
-      { yAxis: zone.from, itemStyle: { color: zone.color } },
+      { name: zone.name, yAxis: zone.from, itemStyle: { color: zone.color } },
       { yAxis: zone.to },
     ]),
   };

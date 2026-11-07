@@ -14,8 +14,10 @@ export interface PointConfig {
   id?: number;
   pointCode: string;
   pointName: string;
-  validUrl?: string;
-  dataUrl: string;
+  /** 计量单位，例如 ℃、MPa */
+  unit?: string;
+  sourceId: number;
+  binding?: PointBinding;
   minLimit?: number;
   maxLimit?: number;
   spcGroupSize?: number;
@@ -29,13 +31,29 @@ export interface PointConfig {
 }
 
 /**
+ * 点位协议绑定
+ */
+export interface PointBinding {
+  registerType?: string;
+  address?: number;
+  quantity?: number;
+  dataType?: string;
+  byteOrder?: string;
+  scale?: number;
+  nodeId?: string;
+  attributeName?: string;
+}
+
+/**
  * 新增采集点请求
  */
 export interface AddPointConfigRequest {
   pointCode: string;
   pointName: string;
-  validUrl?: string;
-  dataUrl: string;
+  /** 计量单位，例如 ℃、MPa */
+  unit?: string;
+  sourceId: number;
+  binding?: PointBinding;
   minLimit?: number;
   maxLimit?: number;
   spcGroupSize?: number;
@@ -145,6 +163,9 @@ export interface DataStatistics {
   maximumValue?: number;
   minimumValue?: number;
   averageValue?: number;
+  standardDeviation?: number;
+  sampleCount?: number;
+  outOfLimitCount?: number;
   status?: number;
   createTime?: string;
   updateTime?: string;
