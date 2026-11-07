@@ -1,22 +1,32 @@
 // src/pages/admin/kafka-point-manage/index.tsx
-import type {ActionType, ProColumns} from '@ant-design/pro-components';
+import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import {
   ModalForm,
   PageContainer,
   ProFormDigit,
+  ProFormSelect,
   ProFormSwitch,
   ProFormText,
   ProTable,
 } from '@ant-design/pro-components';
-import {Button, Descriptions, message, Modal, Space, Table} from 'antd';
-import React, {useRef, useState, useMemo, useEffect} from 'react';
+import {
+  Alert,
+  Button,
+  Descriptions,
+  Modal,
+  message,
+  Select,
+  Space,
+  Table,
+} from 'antd';
 import ReactECharts from 'echarts-for-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  PointConfig,
   AddPointConfigRequest,
-  TaskStatusVO,
   DataDetail,
   DataStatistics,
+  PointConfig,
+  TaskStatusVO,
 } from './data';
 import {
   addPointConfig,
@@ -29,6 +39,16 @@ import {
   stopCollection,
   updatePointConfig,
 } from './service';
+import type { SPCChartType } from './spc';
+import {
+  buildSPC,
+  DEFAULT_SPC_RULE_KEYS,
+  parseSpcRuleKeys,
+  SPC_CHART_LABEL,
+  SPC_CHART_ORDER,
+  SPC_RULE_DEFS,
+} from './spc';
+import { buildSPCOption, getSPCChartHeight } from './spcChart';
 
 /** 数据类型展示文案：1-正常数据，2-非统计数据，3-超过上下限制数据 */
 const DataTypeLabel: Record<number, string> = {
@@ -42,9 +62,13 @@ const KafkaPointManagePage: React.FC = () => {
   const [createModalVisible, setCreateModalVisible] = useState<boolean>(false);
   const [editingPoint, setEditingPoint] = useState<PointConfig | undefined>();
   const [statusModalVisible, setStatusModalVisible] = useState<boolean>(false);
-  const [dataDetailsModalVisible, setDataDetailsModalVisible] = useState<boolean>(false);
-  const [statisticsModalVisible, setStatisticsModalVisible] = useState<boolean>(false);
-  const [currentStatus, setCurrentStatus] = useState<TaskStatusVO | undefined>();
+  const [dataDetailsModalVisible, setDataDetailsModalVisible] =
+    useState<boolean>(false);
+  const [statisticsModalVisible, setStatisticsModalVisible] =
+    useState<boolean>(false);
+  const [currentStatus, setCurrentStatus] = useState<
+    TaskStatusVO | undefined
+  >();
   const [dataDetails, setDataDetails] = useState<DataDetail[]>([]);
   const [dataStatistics, setDataStatistics] = useState<DataStatistics[]>([]);
   const [chartDataDetails, setChartDataDetails] = useState<DataDetail[]>([]); // 用于图表的数据
@@ -53,229 +77,125 @@ const KafkaPointManagePage: React.FC = () => {
   const [loadingDataDetails, setLoadingDataDetails] = useState<boolean>(false);
   const [loadingStatistics, setLoadingStatistics] = useState<boolean>(false);
   const [loadingChartData, setLoadingChartData] = useState<boolean>(false);
-  const [realtimeModalVisible, setRealtimeModalVisible] = useState<boolean>(false);
+  const [realtimeModalVisible, setRealtimeModalVisible] =
+    useState<boolean>(false);
   const [realtimeData, setRealtimeData] = useState<DataDetail[]>([]);
   const [realtimePointCode, setRealtimePointCode] = useState<string>('');
-  const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(false);
+  // 当前实时查看的点位配置（用于 SPC 子组大小、判异规则与上下限）
+  const [realtimePointConfig, setRealtimePointConfig] = useState<
+    PointConfig | undefined
+  >();
+  const [realtimeSpcChartType, setRealtimeSpcChartType] =
+    useState<SPCChartType>('MEAN_RANGE_CHART');
+  const [isRealtimeConnected, setIsRealtimeConnected] =
+    useState<boolean>(false);
   const stompClientRef = useRef<any>(null);
   const socketRef = useRef<any>(null);
+  // 当前查看统计的点位配置（用于 SPC 子组大小、判异规则与上下限）
+  const [currentPointConfig, setCurrentPointConfig] = useState<
+    PointConfig | undefined
+  >();
+  const [spcChartType, setSpcChartType] =
+    useState<SPCChartType>('MEAN_RANGE_CHART');
 
-  // 计算 ECharts 配置选项（必须在组件顶层）
-  const chartOption = useMemo(() => {
-    if (chartDataDetails.length === 0) {
-      return null;
-    }
+  // 当前点位启用的 SPC 判异规则
+  const spcRules = useMemo(
+    () => parseSpcRuleKeys(currentPointConfig?.spcRuleConfig),
+    [currentPointConfig],
+  );
 
-    const filteredData = chartDataDetails
-      .filter((item) => item.value != null && item.collectTime)
-      .map((item) => {
-        if (!item.collectTime) return null;
-        return [
-          new Date(item.collectTime).getTime(),
-          Number(item.value) || 0,
-        ];
-      })
-      .filter((item): item is [number, number] => item !== null)
-      .sort((a, b) => a[0] - b[0]);
+  // SPC 控制图计算结果
+  const spcResult = useMemo(() => {
+    const valid = chartDataDetails.filter(
+      (item): item is DataDetail & { value: number; collectTime: string } =>
+        item.value != null && !!item.collectTime,
+    );
+    return buildSPC(spcChartType, {
+      values: valid.map((item) => item.value),
+      times: valid.map((item) => new Date(item.collectTime).getTime()),
+      groupSize:
+        spcChartType === 'INDIVIDUAL_RANGE_CHART'
+          ? 1
+          : (currentPointConfig?.spcGroupSize ?? 5),
+      ruleKeys: spcRules,
+      usl: currentPointConfig?.maxLimit,
+      lsl: currentPointConfig?.minLimit,
+    });
+  }, [chartDataDetails, spcChartType, currentPointConfig, spcRules]);
 
-    return {
-      tooltip: {
-        trigger: 'axis',
-        formatter: (params: any) => {
-          const param = params[0];
-          const date = new Date(param.value[0]);
-          const dateStr = date.toLocaleDateString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-          });
-          return `${dateStr}<br/>采集值: ${param.value[1].toFixed(2)}`;
-        },
-        axisPointer: {
-          type: 'cross',
-        },
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '10%',
-        top: '10%',
-        containLabel: true,
-      },
-      xAxis: {
-        type: 'time',
-        boundaryGap: false,
-        axisLabel: {
-          formatter: (value: number) => {
-            const date = new Date(value);
-            return date.toLocaleDateString('zh-CN', {
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit',
-            });
-          },
-          rotate: 45,
-        },
-        splitLine: {
-          show: false,
-        },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: {
-          formatter: (value: number) => value.toFixed(2),
-        },
-        splitLine: {
-          show: true,
-          lineStyle: {
-            type: 'dashed',
-          },
-        },
-      },
-      dataZoom: [
-        {
-          type: 'inside',
-          start: 0,
-          end: 100,
-        },
-        {
-          type: 'slider',
-          start: 0,
-          end: 100,
-          height: 20,
-        },
-      ],
-      series: [
-        {
-          name: '采集值',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 6,
-          data: filteredData,
-          lineStyle: {
-            width: 2,
-          },
-          areaStyle: {
-            opacity: 0.3,
-          },
-          animation: true,
-          animationDuration: 1000,
-        },
-      ],
-    };
-  }, [chartDataDetails]);
+  // SPC 控制图 ECharts 配置
+  const spcOption = useMemo(
+    () =>
+      spcResult.seriesList.length > 0
+        ? buildSPCOption(
+            spcResult,
+            spcChartType,
+            getSPCChartHeight(spcChartType),
+          )
+        : null,
+    [spcResult, spcChartType],
+  );
 
-  // 实时数据折线图配置
-  const realtimeChartOption = useMemo(() => {
-    if (realtimeData.length === 0) {
-      return null;
-    }
+  const spcPrimaryLine = spcResult.seriesList[0]?.line;
+  const spcHeight = getSPCChartHeight(spcChartType);
+  const pChartDisabled =
+    !currentPointConfig?.minLimit && !currentPointConfig?.maxLimit;
+  const fmtSPC = (value?: number) =>
+    value === undefined || value === null ? '-' : Number(value).toFixed(3);
 
-    const filteredData = realtimeData
-      .filter((item) => item.value != null && item.collectTime)
-      .map((item) => {
-        if (!item.collectTime) return null;
-        return [
-          new Date(item.collectTime).getTime(),
-          Number(item.value) || 0,
-        ];
-      })
-      .filter((item): item is [number, number] => item !== null)
-      .sort((a, b) => a[0] - b[0]);
+  // 实时点位启用的 SPC 判异规则
+  const realtimeSpcRules = useMemo(
+    () => parseSpcRuleKeys(realtimePointConfig?.spcRuleConfig),
+    [realtimePointConfig],
+  );
 
-    return {
-      tooltip: {
-        trigger: 'axis',
-        formatter: (params: any) => {
-          const param = params[0];
-          const date = new Date(param.value[0]);
-          const dateStr = date.toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          });
-          return `${dateStr}<br/>采集值: ${param.value[1].toFixed(2)}`;
-        },
-        axisPointer: {
-          type: 'cross',
-        },
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '10%',
-        top: '10%',
-        containLabel: true,
-      },
-      xAxis: {
-        type: 'time',
-        boundaryGap: false,
-        axisLabel: {
-          formatter: (value: number) => {
-            const date = new Date(value);
-            return date.toLocaleTimeString('zh-CN', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            });
-          },
-          rotate: 45,
-        },
-        splitLine: {
-          show: false,
-        },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: {
-          formatter: (value: number) => value.toFixed(2),
-        },
-        splitLine: {
-          show: true,
-          lineStyle: {
-            type: 'dashed',
-          },
-        },
-      },
-      dataZoom: [
-        {
-          type: 'inside',
-          start: 0,
-          end: 100,
-        },
-        {
-          type: 'slider',
-          start: 0,
-          end: 100,
-          height: 20,
-        },
-      ],
-      series: [
-        {
-          name: '采集值',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 6,
-          data: filteredData,
-          lineStyle: {
-            width: 2,
-            color: '#1890ff',
-          },
-          areaStyle: {
-            opacity: 0.3,
-            color: '#1890ff',
-          },
-          animation: true,
-          animationDuration: 500,
-        },
-      ],
-    };
-  }, [realtimeData]);
+  // 实时数据 SPC 控制图计算结果（按采集时间升序）
+  const realtimeSpcResult = useMemo(() => {
+    const valid = realtimeData
+      .filter(
+        (item): item is DataDetail & { value: number; collectTime: string } =>
+          item.value != null && !!item.collectTime,
+      )
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(a.collectTime).getTime() - new Date(b.collectTime).getTime(),
+      );
+    return buildSPC(realtimeSpcChartType, {
+      values: valid.map((item) => item.value),
+      times: valid.map((item) => new Date(item.collectTime).getTime()),
+      groupSize:
+        realtimeSpcChartType === 'INDIVIDUAL_RANGE_CHART'
+          ? 1
+          : (realtimePointConfig?.spcGroupSize ?? 5),
+      ruleKeys: realtimeSpcRules,
+      usl: realtimePointConfig?.maxLimit,
+      lsl: realtimePointConfig?.minLimit,
+    });
+  }, [
+    realtimeData,
+    realtimeSpcChartType,
+    realtimePointConfig,
+    realtimeSpcRules,
+  ]);
+
+  // 实时 SPC 控制图 ECharts 配置
+  const realtimeSpcOption = useMemo(
+    () =>
+      realtimeSpcResult.seriesList.length > 0
+        ? buildSPCOption(
+            realtimeSpcResult,
+            realtimeSpcChartType,
+            getSPCChartHeight(realtimeSpcChartType),
+          )
+        : null,
+    [realtimeSpcResult, realtimeSpcChartType],
+  );
+
+  const realtimeSpcPrimaryLine = realtimeSpcResult.seriesList[0]?.line;
+  const realtimeSpcHeight = getSPCChartHeight(realtimeSpcChartType);
+  const realtimePChartDisabled =
+    !realtimePointConfig?.minLimit && !realtimePointConfig?.maxLimit;
 
   const handleAdd = async (fields: AddPointConfigRequest) => {
     const hide = message.loading('正在添加采集点');
@@ -425,7 +345,7 @@ const KafkaPointManagePage: React.FC = () => {
         const wsHost = 'http://localhost:8107/api/notification';
         const wsTopic = '/topic/kafka/data';
 
-        console.log('WebSocket 连接配置:', {wsHost, wsTopic, pointCode});
+        console.log('WebSocket 连接配置:', { wsHost, wsTopic, pointCode });
 
         console.log('开始连接 WebSocket:', wsHost);
         const socket = new SockJS(wsHost);
@@ -436,65 +356,85 @@ const KafkaPointManagePage: React.FC = () => {
           console.log('STOMP:', str);
         };
 
-        stompClient.connect({}, (frame: any) => {
-          console.log('实时数据 WebSocket 连接成功:', frame);
-          setIsRealtimeConnected(true);
-          message.success('实时数据连接成功');
+        stompClient.connect(
+          {},
+          (frame: any) => {
+            console.log('实时数据 WebSocket 连接成功:', frame);
+            setIsRealtimeConnected(true);
+            message.success('实时数据连接成功');
 
-          // 订阅消息
-          console.log('准备订阅主题:', wsTopic);
-          try {
-            const subscription = stompClient.subscribe(wsTopic, (response: any) => {
-              console.log('收到 WebSocket 消息:', response.body);
-              try {
-                const data: DataDetail = JSON.parse(response.body);
-                console.log('解析后的数据:', data);
-                console.log('当前点位编码:', pointCode, '收到点位编码:', data.pointCode);
+            // 订阅消息
+            console.log('准备订阅主题:', wsTopic);
+            try {
+              const subscription = stompClient.subscribe(
+                wsTopic,
+                (response: any) => {
+                  console.log('收到 WebSocket 消息:', response.body);
+                  try {
+                    const data: DataDetail = JSON.parse(response.body);
+                    console.log('解析后的数据:', data);
+                    console.log(
+                      '当前点位编码:',
+                      pointCode,
+                      '收到点位编码:',
+                      data.pointCode,
+                    );
 
-                // 只接收当前点位的数据
-                if (data.pointCode === pointCode) {
-                  console.log('点位匹配，更新数据');
-                  setRealtimeData((prev) => {
-                    const now = Date.now();
-                    const fiveMinutesAgo = now - 5 * 60 * 1000;
-                    // 过滤出最近5分钟的数据
-                    const filtered = [
-                      ...prev,
-                      data,
-                    ].filter((item) => {
-                      if (!item.collectTime) return false;
-                      const collectTime = new Date(item.collectTime).getTime();
-                      return collectTime >= fiveMinutesAgo;
-                    });
-                    // 按时间降序排序（最新的在最上面）
-                    const sorted = filtered.sort((a, b) => {
-                      const timeA = a.collectTime ? new Date(a.collectTime).getTime() : 0;
-                      const timeB = b.collectTime ? new Date(b.collectTime).getTime() : 0;
-                      return timeB - timeA; // 降序：timeB - timeA
-                    });
-                    console.log('更新后的数据量:', sorted.length);
-                    return sorted;
-                  });
-                } else {
-                  console.log('点位不匹配，忽略数据');
-                }
-              } catch (error) {
-                console.error('解析 WebSocket 消息失败:', error, '原始消息:', response.body);
-              }
-            });
+                    // 只接收当前点位的数据
+                    if (data.pointCode === pointCode) {
+                      console.log('点位匹配，更新数据');
+                      setRealtimeData((prev) => {
+                        const now = Date.now();
+                        const fiveMinutesAgo = now - 5 * 60 * 1000;
+                        // 过滤出最近5分钟的数据
+                        const filtered = [...prev, data].filter((item) => {
+                          if (!item.collectTime) return false;
+                          const collectTime = new Date(
+                            item.collectTime,
+                          ).getTime();
+                          return collectTime >= fiveMinutesAgo;
+                        });
+                        // 按时间降序排序（最新的在最上面）
+                        const sorted = filtered.sort((a, b) => {
+                          const timeA = a.collectTime
+                            ? new Date(a.collectTime).getTime()
+                            : 0;
+                          const timeB = b.collectTime
+                            ? new Date(b.collectTime).getTime()
+                            : 0;
+                          return timeB - timeA; // 降序：timeB - timeA
+                        });
+                        console.log('更新后的数据量:', sorted.length);
+                        return sorted;
+                      });
+                    } else {
+                      console.log('点位不匹配，忽略数据');
+                    }
+                  } catch (error) {
+                    console.error(
+                      '解析 WebSocket 消息失败:',
+                      error,
+                      '原始消息:',
+                      response.body,
+                    );
+                  }
+                },
+              );
 
-            console.log('订阅成功，订阅对象:', subscription);
-            // 保存订阅引用，以便后续取消订阅
-            (stompClientRef.current as any).subscription = subscription;
-          } catch (subscribeError) {
-            console.error('订阅失败:', subscribeError);
-            message.error('订阅主题失败: ' + wsTopic);
-          }
-        }, (error: any) => {
-          console.error('实时数据 WebSocket 连接错误:', error);
-          message.error('实时数据连接失败: ' + (error.message || '未知错误'));
-          setIsRealtimeConnected(false);
-        });
+              console.log('订阅成功，订阅对象:', subscription);
+              // 保存订阅引用，以便后续取消订阅
+              (stompClientRef.current as any).subscription = subscription;
+            } catch (subscribeError) {
+              console.error('订阅失败:', subscribeError);
+              message.error('订阅主题失败: ' + wsTopic);
+            }
+          },
+          (error: any) => {
+            console.error('实时数据 WebSocket 连接错误:', error);
+            message.error('实时数据连接失败: ' + (error.message || '未知错误'));
+            setIsRealtimeConnected(false);
+          },
+        );
 
         stompClientRef.current = stompClient;
         socketRef.current = socket;
@@ -583,6 +523,8 @@ const KafkaPointManagePage: React.FC = () => {
     }
 
     setRealtimePointCode(record.pointCode);
+    setRealtimePointConfig(record);
+    setRealtimeSpcChartType('MEAN_RANGE_CHART');
     setRealtimeModalVisible(true);
     initRealtimeWebSocket(record.pointCode);
   };
@@ -593,6 +535,8 @@ const KafkaPointManagePage: React.FC = () => {
     setRealtimeModalVisible(false);
     setRealtimeData([]);
     setRealtimePointCode('');
+    setRealtimePointConfig(undefined);
+    setRealtimeSpcChartType('MEAN_RANGE_CHART');
   };
 
   // 组件卸载时断开连接
@@ -608,6 +552,8 @@ const KafkaPointManagePage: React.FC = () => {
       return;
     }
     setCurrentPointCode(record.pointCode);
+    setCurrentPointConfig(record);
+    setSpcChartType('MEAN_RANGE_CHART');
     setLoadingStatistics(true);
     setLoadingChartData(true);
     try {
@@ -685,24 +631,24 @@ const KafkaPointManagePage: React.FC = () => {
       title: '是否主点',
       dataIndex: 'isMainPoint',
       valueEnum: {
-        0: {text: '否'},
-        1: {text: '是'},
+        0: { text: '否' },
+        1: { text: '是' },
       },
     },
     {
       title: '状态',
       dataIndex: 'status',
       valueEnum: {
-        0: {text: '禁用', status: 'Default'},
-        1: {text: '启用', status: 'Success'},
+        0: { text: '禁用', status: 'Default' },
+        1: { text: '启用', status: 'Success' },
       },
     },
     {
       title: '运行状态',
       dataIndex: 'runningStatus',
       valueEnum: {
-        0: {text: '停止', status: 'Default'},
-        1: {text: '运行中', status: 'Success'},
+        0: { text: '停止', status: 'Default' },
+        1: { text: '运行中', status: 'Success' },
       },
     },
     {
@@ -780,7 +726,7 @@ const KafkaPointManagePage: React.FC = () => {
 
   return (
     <PageContainer>
-      <Space direction="vertical" size="middle" style={{width: '100%'}}>
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <ProTable<PointConfig>
           headerTitle="采集点管理"
           actionRef={actionRef}
@@ -847,29 +793,38 @@ const KafkaPointManagePage: React.FC = () => {
 
       <ModalForm
         title={editingPoint ? '编辑采集点' : '新增采集点'}
-        width="480px"
+        width="560px"
         open={createModalVisible}
         onOpenChange={setCreateModalVisible}
-        modalProps={{destroyOnClose: true}}
+        modalProps={{ destroyOnClose: true }}
         initialValues={
           editingPoint
             ? {
-              ...editingPoint,
-              isMainPoint: editingPoint.isMainPoint === 1,
-              status: editingPoint.status === 1,
-            }
+                ...editingPoint,
+                isMainPoint: editingPoint.isMainPoint === 1,
+                status: editingPoint.status === 1,
+                spcGroupSize: editingPoint.spcGroupSize ?? 5,
+                spcRuleKeys: parseSpcRuleKeys(editingPoint.spcRuleConfig),
+              }
             : {
-              status: true,
-            }
+                status: true,
+                spcGroupSize: 5,
+                spcRuleKeys: DEFAULT_SPC_RULE_KEYS,
+              }
         }
         onFinish={async (value) => {
-          // 将 Boolean 转换为 Integer (0/1)
+          // 将 Boolean 转换为 Integer (0/1)，并把判异规则多选序列化为 JSON
           const submitData: any = {
             ...editingPoint,
             ...value,
             isMainPoint: value.isMainPoint ? 1 : 0,
             status: value.status ? 1 : 0,
+            spcGroupSize: value.spcGroupSize ?? 5,
+            spcRuleConfig: JSON.stringify(
+              value.spcRuleKeys ?? DEFAULT_SPC_RULE_KEYS,
+            ),
           };
+          delete submitData.spcRuleKeys;
 
           let success = false;
           if (editingPoint && editingPoint.id) {
@@ -903,33 +858,54 @@ const KafkaPointManagePage: React.FC = () => {
         <ProFormText
           name="pointCode"
           label="采集点编码"
-          rules={[{required: true, message: '请输入采集点编码'}]}
+          rules={[{ required: true, message: '请输入采集点编码' }]}
         />
         <ProFormText
           name="pointName"
           label="采集点名称"
-          rules={[{required: true, message: '请输入采集点名称'}]}
+          rules={[{ required: true, message: '请输入采集点名称' }]}
         />
-        <ProFormText name="validUrl" label="校验URL"/>
+        <ProFormText name="validUrl" label="校验URL" />
         <ProFormText
           name="dataUrl"
           label="数据URL"
-          rules={[{required: true, message: '请输入数据URL'}]}
+          rules={[{ required: true, message: '请输入数据URL' }]}
         />
-        <ProFormDigit name="minLimit" label="最小限值" fieldProps={{min: -99999}}/>
-        <ProFormDigit name="maxLimit" label="最大限值" fieldProps={{min: -99999}}/>
+        <ProFormDigit
+          name="minLimit"
+          label="最小限值"
+          fieldProps={{ min: -99999 }}
+        />
+        <ProFormDigit
+          name="maxLimit"
+          label="最大限值"
+          fieldProps={{ min: -99999 }}
+        />
         <ProFormDigit
           name="intervalSeconds"
           label="采集间隔(秒)"
-          fieldProps={{min: 1}}
-          rules={[{required: true, message: '请输入采集间隔'}]}
+          fieldProps={{ min: 1 }}
+          rules={[{ required: true, message: '请输入采集间隔' }]}
         />
-        <ProFormSwitch name="isMainPoint" label="是否主点"/>
-        <ProFormSwitch
-          name="status"
-          label="是否启用"
-          initialValue={true}
+        <ProFormDigit
+          name="spcGroupSize"
+          label="SPC子组大小"
+          tooltip="2-25，默认 5；I-MR 图型运行时按 1 处理"
+          fieldProps={{ min: 2, max: 25, precision: 0 }}
+          rules={[{ required: true, message: '请输入 SPC 子组大小' }]}
         />
+        <ProFormSelect
+          name="spcRuleKeys"
+          label="SPC判异规则"
+          options={SPC_RULE_DEFS.map((rule) => ({
+            label: rule.label,
+            value: rule.key,
+          }))}
+          fieldProps={{ mode: 'multiple' }}
+          rules={[{ required: true, message: '请至少启用一条判异规则' }]}
+        />
+        <ProFormSwitch name="isMainPoint" label="是否主点" />
+        <ProFormSwitch name="status" label="是否启用" initialValue={true} />
       </ModalForm>
 
       {/* 采集任务状态 Modal */}
@@ -945,7 +921,7 @@ const KafkaPointManagePage: React.FC = () => {
         width={800}
       >
         {loadingStatus ? (
-          <div style={{textAlign: 'center', padding: '20px'}}>加载中...</div>
+          <div style={{ textAlign: 'center', padding: '20px' }}>加载中...</div>
         ) : currentStatus ? (
           <Descriptions column={2} bordered>
             <Descriptions.Item label="运行中">
@@ -979,7 +955,7 @@ const KafkaPointManagePage: React.FC = () => {
         width={1000}
       >
         {loadingDataDetails ? (
-          <div style={{textAlign: 'center', padding: '20px'}}>加载中...</div>
+          <div style={{ textAlign: 'center', padding: '20px' }}>加载中...</div>
         ) : dataDetails.length > 0 ? (
           <Table
             columns={[
@@ -1015,7 +991,7 @@ const KafkaPointManagePage: React.FC = () => {
                 dataIndex: 'dataType',
                 key: 'dataType',
                 render: (dataType: number) =>
-                  dataType != null ? DataTypeLabel[dataType] ?? '-' : '-',
+                  dataType != null ? (DataTypeLabel[dataType] ?? '-') : '-',
               },
             ]}
             dataSource={dataDetails}
@@ -1058,6 +1034,8 @@ const KafkaPointManagePage: React.FC = () => {
           setStatisticsModalVisible(false);
           setChartDataDetails([]);
           setCurrentPointCode('');
+          setCurrentPointConfig(undefined);
+          setSpcChartType('MEAN_RANGE_CHART');
         }}
         footer={[
           <Button
@@ -1066,6 +1044,8 @@ const KafkaPointManagePage: React.FC = () => {
               setStatisticsModalVisible(false);
               setChartDataDetails([]);
               setCurrentPointCode('');
+              setCurrentPointConfig(undefined);
+              setSpcChartType('MEAN_RANGE_CHART');
             }}
           >
             关闭
@@ -1074,27 +1054,117 @@ const KafkaPointManagePage: React.FC = () => {
         width={1400}
       >
         {loadingStatistics || loadingChartData ? (
-          <div style={{textAlign: 'center', padding: '20px'}}>加载中...</div>
+          <div style={{ textAlign: 'center', padding: '20px' }}>加载中...</div>
         ) : (
-          <Space direction="vertical" size="large" style={{width: '100%'}}>
-            {/* 折线图 */}
-            {chartOption && chartDataDetails.length > 0 && (
-              <div style={{marginBottom: 24, width: '100%'}}>
-                <h3 style={{marginBottom: 16}}>
-                  采集数据趋势图 {currentPointCode ? `（${currentPointCode}）` : ''}
+          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            {/* SPC 控制图 */}
+            <div style={{ marginBottom: 24, width: '100%' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <h3 style={{ margin: 0 }}>
+                  SPC 控制图 {currentPointCode ? `（${currentPointCode}）` : ''}
                 </h3>
-                <ReactECharts
-                  option={chartOption}
-                  style={{width: '100%', height: '400px'}}
-                  opts={{renderer: 'svg'}}
-                />
+                <Space size="middle">
+                  <span>图型：</span>
+                  <Select
+                    value={spcChartType}
+                    style={{ width: 240 }}
+                    onChange={(value) => setSpcChartType(value as SPCChartType)}
+                    options={SPC_CHART_ORDER.map((type) => ({
+                      label: SPC_CHART_LABEL[type],
+                      value: type,
+                      disabled:
+                        type === 'FRACTION_DEFECTIVE_PARTS_CHART' &&
+                        pChartDisabled,
+                    }))}
+                  />
+                </Space>
               </div>
-            )}
+
+              <Descriptions
+                bordered
+                size="small"
+                column={4}
+                style={{ marginBottom: 12 }}
+              >
+                <Descriptions.Item label="子组数">
+                  {spcResult.stats.groupCount}
+                </Descriptions.Item>
+                <Descriptions.Item label="子组大小">
+                  {spcResult.stats.groupSize}
+                </Descriptions.Item>
+                <Descriptions.Item label="判异规则">
+                  {spcRules.length > 0 ? spcRules.join('、') : '未启用'}
+                </Descriptions.Item>
+                <Descriptions.Item label="判异点数">
+                  {spcResult.stats.violationCount}
+                </Descriptions.Item>
+                <Descriptions.Item label="CL">
+                  {fmtSPC(spcPrimaryLine?.cl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="UCL">
+                  {fmtSPC(spcPrimaryLine?.ucl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="LCL">
+                  {fmtSPC(spcPrimaryLine?.lcl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="超限点数">
+                  {spcResult.stats.outOfSpecCount}
+                </Descriptions.Item>
+                <Descriptions.Item label="Cp">
+                  {spcResult.capability?.cp ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Cpk">
+                  {spcResult.capability?.cpk ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Pp">
+                  {spcResult.capability?.pp ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Ppk">
+                  {spcResult.capability?.ppk ?? '-'}
+                </Descriptions.Item>
+              </Descriptions>
+
+              {spcResult.warning && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={spcResult.warning}
+                  style={{ marginBottom: 12 }}
+                />
+              )}
+
+              {spcOption ? (
+                <ReactECharts
+                  option={spcOption}
+                  style={{ width: '100%', height: `${spcHeight}px` }}
+                  opts={{ renderer: 'svg' }}
+                />
+              ) : (
+                <div
+                  style={{
+                    padding: '40px 0',
+                    textAlign: 'center',
+                    color: '#999',
+                  }}
+                >
+                  数据不足，无法绘制 SPC 控制图
+                </div>
+              )}
+            </div>
 
             {/* 统计数据表格 */}
             {dataStatistics.length > 0 ? (
               <div>
-                <h3 style={{marginBottom: 16}}>统计数据列表</h3>
+                <h3 style={{ marginBottom: 16 }}>统计数据列表</h3>
                 <Table
                   columns={[
                     {
@@ -1180,35 +1250,132 @@ const KafkaPointManagePage: React.FC = () => {
         width={1400}
         destroyOnClose
       >
-        <Space direction="vertical" size="large" style={{width: '100%'}}>
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
           {/* 连接状态 */}
-          <div style={{textAlign: 'right'}}>
-            <span style={{marginRight: 16}}>
-              连接状态: {isRealtimeConnected ? (
-              <span style={{color: '#52c41a'}}>已连接</span>
-            ) : (
-              <span style={{color: '#ff4d4f'}}>未连接</span>
-            )}
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ marginRight: 16 }}>
+              连接状态:{' '}
+              {isRealtimeConnected ? (
+                <span style={{ color: '#52c41a' }}>已连接</span>
+              ) : (
+                <span style={{ color: '#ff4d4f' }}>未连接</span>
+              )}
             </span>
             <span>数据量: {realtimeData.length} 条（最近5分钟）</span>
           </div>
 
-          {/* 实时折线图 */}
-          {realtimeChartOption && realtimeData.length > 0 && (
-            <div style={{marginBottom: 24, width: '100%'}}>
-              <h3 style={{marginBottom: 16}}>实时数据趋势图</h3>
-              <ReactECharts
-                option={realtimeChartOption}
-                style={{width: '100%', height: '400px'}}
-                opts={{renderer: 'svg'}}
-              />
+          {/* 实时 SPC 控制图 */}
+          {realtimeData.length > 0 && (
+            <div style={{ marginBottom: 24, width: '100%' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <h3 style={{ margin: 0 }}>实时 SPC 控制图</h3>
+                <Space size="middle">
+                  <span>图型：</span>
+                  <Select
+                    value={realtimeSpcChartType}
+                    style={{ width: 240 }}
+                    onChange={(value) =>
+                      setRealtimeSpcChartType(value as SPCChartType)
+                    }
+                    options={SPC_CHART_ORDER.map((type) => ({
+                      label: SPC_CHART_LABEL[type],
+                      value: type,
+                      disabled:
+                        type === 'FRACTION_DEFECTIVE_PARTS_CHART' &&
+                        realtimePChartDisabled,
+                    }))}
+                  />
+                </Space>
+              </div>
+
+              <Descriptions
+                bordered
+                size="small"
+                column={4}
+                style={{ marginBottom: 12 }}
+              >
+                <Descriptions.Item label="子组数">
+                  {realtimeSpcResult.stats.groupCount}
+                </Descriptions.Item>
+                <Descriptions.Item label="子组大小">
+                  {realtimeSpcResult.stats.groupSize}
+                </Descriptions.Item>
+                <Descriptions.Item label="判异规则">
+                  {realtimeSpcRules.length > 0
+                    ? realtimeSpcRules.join('、')
+                    : '未启用'}
+                </Descriptions.Item>
+                <Descriptions.Item label="判异点数">
+                  {realtimeSpcResult.stats.violationCount}
+                </Descriptions.Item>
+                <Descriptions.Item label="CL">
+                  {fmtSPC(realtimeSpcPrimaryLine?.cl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="UCL">
+                  {fmtSPC(realtimeSpcPrimaryLine?.ucl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="LCL">
+                  {fmtSPC(realtimeSpcPrimaryLine?.lcl)}
+                </Descriptions.Item>
+                <Descriptions.Item label="超限点数">
+                  {realtimeSpcResult.stats.outOfSpecCount}
+                </Descriptions.Item>
+                <Descriptions.Item label="Cp">
+                  {realtimeSpcResult.capability?.cp ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Cpk">
+                  {realtimeSpcResult.capability?.cpk ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Pp">
+                  {realtimeSpcResult.capability?.pp ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Ppk">
+                  {realtimeSpcResult.capability?.ppk ?? '-'}
+                </Descriptions.Item>
+              </Descriptions>
+
+              {realtimeSpcResult.warning && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={realtimeSpcResult.warning}
+                  style={{ marginBottom: 12 }}
+                />
+              )}
+
+              {realtimeSpcOption ? (
+                <ReactECharts
+                  option={realtimeSpcOption}
+                  style={{ width: '100%', height: `${realtimeSpcHeight}px` }}
+                  opts={{ renderer: 'svg' }}
+                />
+              ) : (
+                <div
+                  style={{
+                    padding: '40px 0',
+                    textAlign: 'center',
+                    color: '#999',
+                  }}
+                >
+                  数据不足，无法绘制 SPC 控制图
+                </div>
+              )}
             </div>
           )}
 
           {/* 实时数据表格 */}
           {realtimeData.length > 0 ? (
             <div>
-              <h3 style={{marginBottom: 16}}>实时数据列表</h3>
+              <h3 style={{ marginBottom: 16 }}>实时数据列表</h3>
               <Table
                 columns={[
                   {
@@ -1247,11 +1414,13 @@ const KafkaPointManagePage: React.FC = () => {
                     dataIndex: 'dataType',
                     key: 'dataType',
                     render: (dataType: number) =>
-                      dataType != null ? DataTypeLabel[dataType] ?? '-' : '-',
+                      dataType != null ? (DataTypeLabel[dataType] ?? '-') : '-',
                   },
                 ]}
                 dataSource={realtimeData}
-                rowKey={(record, index) => record.id?.toString() || `realtime-${index}`}
+                rowKey={(record, index) =>
+                  record.id?.toString() || `realtime-${index}`
+                }
                 onRow={(record) => {
                   let backgroundColor: string | undefined;
                   if (record.dataType === 2) {
@@ -1273,11 +1442,11 @@ const KafkaPointManagePage: React.FC = () => {
                   showQuickJumper: true,
                 }}
                 size="small"
-                scroll={{y: 400}}
+                scroll={{ y: 400 }}
               />
             </div>
           ) : (
-            <div style={{textAlign: 'center', padding: '40px'}}>
+            <div style={{ textAlign: 'center', padding: '40px' }}>
               暂无实时数据，等待数据推送...
             </div>
           )}
@@ -1288,4 +1457,3 @@ const KafkaPointManagePage: React.FC = () => {
 };
 
 export default KafkaPointManagePage;
-

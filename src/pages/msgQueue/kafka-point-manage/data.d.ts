@@ -18,6 +18,8 @@ export interface PointConfig {
   dataUrl: string;
   minLimit?: number;
   maxLimit?: number;
+  spcGroupSize?: number;
+  spcRuleConfig?: string;
   intervalSeconds: number;
   isMainPoint?: number;
   status?: number;
@@ -36,6 +38,8 @@ export interface AddPointConfigRequest {
   dataUrl: string;
   minLimit?: number;
   maxLimit?: number;
+  spcGroupSize?: number;
+  spcRuleConfig?: string;
   intervalSeconds: number;
   isMainPoint?: number;
   status?: number;
